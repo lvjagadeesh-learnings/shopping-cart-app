@@ -22,6 +22,10 @@ on:
   push:
     branches: ["main"]
 
+concurrency:
+  group: ci-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   security-events: write
@@ -35,45 +39,22 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Filter changed paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             backend:
               - 'backend/**'
               - '.github/workflows/ci-backend.yml'
-              - '.github/workflows/reusable-dotnet-ci.yml'
 
-  build-unit-test-backend:
-    name: Build & Unit Test (${{ matrix.service.name }})
-    needs: detect-changes
-    if: needs.detect-changes.outputs.backend == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - { name: auth-service, project: services/auth-service/AuthService.Api/AuthService.Api.csproj, tests: services/auth-service/AuthService.Tests/AuthService.Tests.csproj, dockerfile: services/auth-service/Dockerfile }
-          - { name: catalog-service, project: services/catalog-service/CatalogService.Api/CatalogService.Api.csproj, tests: services/catalog-service/CatalogService.Tests/CatalogService.Tests.csproj, dockerfile: services/catalog-service/Dockerfile }
-          - { name: cart-service, project: services/cart-service/CartService.Api/CartService.Api.csproj, tests: services/cart-service/CartService.Tests/CartService.Tests.csproj, dockerfile: services/cart-service/Dockerfile }
-          - { name: order-service, project: services/order-service/OrderService.Api/OrderService.Api.csproj, tests: services/order-service/OrderService.Tests/OrderService.Tests.csproj, dockerfile: services/order-service/Dockerfile }
-          - { name: payment-service, project: services/payment-service/PaymentService.Api/PaymentService.Api.csproj, tests: services/payment-service/PaymentService.Tests/PaymentService.Tests.csproj, dockerfile: services/payment-service/Dockerfile }
-          - { name: inventory-service, project: services/inventory-service/InventoryService.Api/InventoryService.Api.csproj, tests: services/inventory-service/InventoryService.Tests/InventoryService.Tests.csproj, dockerfile: services/inventory-service/Dockerfile }
-          - { name: notification-service, project: services/notification-service/NotificationService.Api/NotificationService.Api.csproj, tests: services/notification-service/NotificationService.Tests/NotificationService.Tests.csproj, dockerfile: services/notification-service/Dockerfile }
-          - { name: review-service, project: services/review-service/ReviewService.Api/ReviewService.Api.csproj, tests: services/review-service/ReviewService.Tests/ReviewService.Tests.csproj, dockerfile: services/review-service/Dockerfile }
-          - { name: recommendation-service, project: services/recommendation-service/RecommendationService.Api/RecommendationService.Api.csproj, tests: services/recommendation-service/RecommendationService.Tests/RecommendationService.Tests.csproj, dockerfile: services/recommendation-service/Dockerfile }
-    uses: ./.github/workflows/reusable-dotnet-ci.yml
-    with:
-      service-name: ${{ matrix.service.name }}
-      project-path: ${{ matrix.service.project }}
-      test-project-path: ${{ matrix.service.tests }}
-      dockerfile-path: ${{ matrix.service.dockerfile }}
-      # image-repository intentionally omitted: CI is test-only, no image build/push
-
-  integration-test:
-    name: Integration Tests
+  # All 9 services build together as one clear "Build" stage instead of a
+  # 9-way matrix, so the pipeline reads as a simple build -> unit test ->
+  # integration test -> code scanning sequence in the Actions UI.
+  build-backend:
+    name: Build
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -82,7 +63,59 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build all services (excluding Aspire AppHost)
+        run: |
+          # AppHost requires the Aspire CLI bundle (not available on hosted
+          # runners) and isn't itself a source of deployable service logic.
+          set -euo pipefail
+          find . -name '*.csproj' ! -path '*/AppHost/*' -print0 | xargs -0 -n1 dotnet build --configuration Release
+
+  unit-test-backend:
+    name: Unit Tests
+    needs: build-backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run unit tests for all services
+        run: |
+          set -euo pipefail
+          find . -name '*.Tests.csproj' -print0 | xargs -0 -n1 dotnet test --configuration Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: backend/**/TestResults/**/*.trx
+          if-no-files-found: ignore
+
+  integration-test:
+    name: Integration Tests
+    needs: unit-test-backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -105,6 +138,9 @@ jobs:
             echo "No test project currently defines an Integration-category test; stage is a no-op placeholder until one is added." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
+  # No backend e2e suite exists yet; add an `e2e-test` job here (mirroring
+  # ci-frontend.yml's placeholder) once one is introduced.
+
   code-scanning-backend:
     name: Code Scanning (CodeQL - C#)
     needs: detect-changes
@@ -112,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -138,7 +174,8 @@ jobs:
     needs:
       [
         detect-changes,
-        build-unit-test-backend,
+        build-backend,
+        unit-test-backend,
         integration-test,
         code-scanning-backend,
       ]
@@ -153,14 +190,16 @@ jobs:
             echo ""
             echo "| Stage | Result |"
             echo "|---|---|"
-            echo "| Build & Unit Test | ${{ needs.build-unit-test-backend.result }} |"
+            echo "| Build | ${{ needs.build-backend.result }} |"
+            echo "| Unit Tests | ${{ needs.unit-test-backend.result }} |"
             echo "| Integration Tests | ${{ needs.integration-test.result }} |"
             echo "| Code Scanning | ${{ needs.code-scanning-backend.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail summary if any required stage failed
         if: |
-          needs.build-unit-test-backend.result == 'failure' ||
+          needs.build-backend.result == 'failure' ||
+          needs.unit-test-backend.result == 'failure' ||
           needs.integration-test.result == 'failure' ||
           needs.code-scanning-backend.result == 'failure'
         run: |

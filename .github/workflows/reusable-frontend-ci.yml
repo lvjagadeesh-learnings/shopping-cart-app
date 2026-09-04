@@ -41,16 +41,15 @@ permissions:
   contents: read
 
 jobs:
-  build-test:
-    name: Build, Lint & Test (frontend)
+  build:
+    name: Build (frontend)
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -65,9 +64,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npm run test -- --run
-
       - name: Build
         env:
           VITE_API_BASE_URL: ${{ inputs.api-base-url }}
@@ -79,8 +75,44 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
+  unit-test:
+    name: Unit Tests (frontend)
+    needs: build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run test -- --run
+
+  deploy:
+    name: Deploy (frontend)
+    needs: unit-test
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: frontend-dist
+          path: dist
+
       - name: Configure AWS credentials (access key)
-        if: inputs.deploy
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ inputs.aws-access-key-id }}
@@ -88,9 +120,7 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
 
       - name: Sync to S3
-        if: inputs.deploy
         run: aws s3 sync dist "s3://${{ inputs.bucket-name }}" --delete
 
       - name: Invalidate CloudFront
-        if: inputs.deploy
         run: aws cloudfront create-invalidation --distribution-id "${{ inputs.distribution-id }}" --paths "/*"

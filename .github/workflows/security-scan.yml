@@ -12,6 +12,10 @@ on:
   push:
     branches: ["main"]
 
+concurrency:
+  group: security-scan-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -21,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Trivy filesystem scan (dependencies)
         uses: aquasecurity/trivy-action@v0.36.0

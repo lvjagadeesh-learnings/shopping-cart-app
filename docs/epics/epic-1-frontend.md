@@ -1,6 +1,6 @@
 # Epic 1 — Frontend development (React.js v19)
 
-**Tech stack:** React 19 + TypeScript + Vite (SPA)
+**Tech stack:** React 19 + JavaScript + Vite (SPA)
 
 Everything a Shopper or Admin sees and interacts with in the browser: catalog
 browsing, auth, cart, checkout, order tracking & admin fulfillment, notifications &

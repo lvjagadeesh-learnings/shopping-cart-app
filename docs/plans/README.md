@@ -28,7 +28,7 @@
 - Scaffold the solution: one ASP.NET Core Web API project per microservice under
   `backend/services/`, shared conventions for health checks, logging, and JWT
   validation middleware. *(Epic 2)*
-- Scaffold the React 19 + TypeScript + Vite frontend under `frontend/`, with a client
+- Scaffold the React 19 + JavaScript + Vite frontend under `frontend/`, with a client
   for each backend service under `src/api/`, Zustand (or equivalent) store under
   `src/store/`, and route-level pages under `src/pages/`. *(Epic 1)*
 - Establish local dev experience (per-service `dotnet run`, frontend `npm run dev`)

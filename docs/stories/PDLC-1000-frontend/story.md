@@ -5,7 +5,7 @@
 > [`../../plans/PDLC-1000-frontend/plan.md`](../../plans/PDLC-1000-frontend/plan.md).
 
 Everything a Shopper or Admin sees and interacts with in the browser (React 19 +
-TypeScript + Vite SPA).
+JavaScript + Vite SPA).
 
 - **US-1.1**: As a Shopper, I want to browse a grid of products on the homepage, so
   that I can discover what's available.

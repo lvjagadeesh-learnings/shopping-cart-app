@@ -1,4 +1,4 @@
-# React + TypeScript + Vite
+# React + JavaScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
@@ -13,15 +13,12 @@ The React Compiler is not enabled on this template because of its impact on dev 
 
 ## Expanding the Oxlint configuration
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+This is a plain JavaScript project (no TypeScript), so type-aware lint rules aren't applicable. `.oxlintrc.json` enables the `react` and `oxc` plugins only:
 
 ```json
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
+  "plugins": ["react", "oxc"],
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]

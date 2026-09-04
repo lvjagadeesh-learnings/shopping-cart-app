@@ -4,7 +4,7 @@
   { "ParameterKey": "MasterUsername", "ParameterValue": "shoppingcart_admin" },
   { "ParameterKey": "MinCapacity", "ParameterValue": "0.5" },
   { "ParameterKey": "MaxCapacity", "ParameterValue": "2" },
-  { "ParameterKey": "EngineVersion", "ParameterValue": "16.4" },
+  { "ParameterKey": "EngineVersion", "ParameterValue": "16.9" },
   { "ParameterKey": "BackupRetentionPeriod", "ParameterValue": "1" },
   { "ParameterKey": "DeletionProtection", "ParameterValue": "false" }
 ]

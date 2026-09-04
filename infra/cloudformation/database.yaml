@@ -30,7 +30,8 @@ Parameters:
 
   EngineVersion:
     Type: String
-    Default: '16.4'
+    Default: '16.9'
+    Description: Aurora PostgreSQL engine version (16.4 was retired by AWS; use `aws rds describe-db-engine-versions --engine aurora-postgresql` to check current availability).
 
   BackupRetentionPeriod:
     Type: Number
@@ -41,12 +42,17 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'false'
 
+  MasterUserPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Aurora master user password (supplied via secret, not generated - sandbox SCP denies secretsmanager:GetRandomPassword).
+
 Resources:
   AuroraStorageKey:
     Type: AWS::KMS::Key
     Properties:
       Description: !Sub Customer managed key for ${EnvironmentName} Aurora storage encryption
-      EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
@@ -91,11 +97,7 @@ Resources:
     Properties:
       Name: !Sub ${EnvironmentName}/shopping-cart/db-credentials
       Description: !Sub Aurora PostgreSQL master credentials for ${EnvironmentName}
-      GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username":"${MasterUsername}"}'
-        GenerateStringKey: password
-        PasswordLength: 32
-        ExcludeCharacters: '"@/\'
+      SecretString: !Sub '{"username":"${MasterUsername}","password":"${MasterUserPassword}"}'
 
   AuroraCluster:
     Type: AWS::RDS::DBCluster

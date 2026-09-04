@@ -29,14 +29,6 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
 
   # Default task role for services with no special AWS permissions
   # (Auth, Catalog, Cart, Payment). Read-only access to its own DB secret.
@@ -51,14 +43,6 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
 
   # Order Service: publishes OrderPlaced/OrderStatusChanged events to SNS.
   OrderServiceTaskRole:
@@ -72,21 +56,6 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
-        - PolicyName: publish-order-events
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: sns:Publish
-                Resource: !Sub arn:aws:sns:*:${AWS::AccountId}:${EnvironmentName}-order-events
 
   # Inventory, Notification, Recommendation: consume OrderPlaced (and, for
   # Notification, OrderStatusChanged) events from their own SQS queue.
@@ -101,24 +70,6 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
-        - PolicyName: consume-order-placed-queue
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-inventory-order-placed-queue
 
   NotificationServiceTaskRole:
     Type: AWS::IAM::Role
@@ -131,26 +82,6 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
-        - PolicyName: consume-notification-queues
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource:
-                  - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-placed-queue
-                  - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-status-changed-queue
 
   RecommendationServiceTaskRole:
     Type: AWS::IAM::Role
@@ -163,24 +94,91 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: read-db-secret
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
-        - PolicyName: consume-order-placed-queue
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-recommendation-order-placed-queue
+
+  # NOTE: the sandbox account's SCP denies iam:PutRolePolicy (inline role
+  # policies), so every permission below is a standalone AWS::IAM::ManagedPolicy
+  # attached via the Roles property instead (uses iam:CreatePolicy +
+  # iam:AttachRolePolicy).
+  ReadDbSecretPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${EnvironmentName}-read-db-secret
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+      Roles:
+        - !Ref EcsTaskExecutionRole
+        - !Ref EcsDefaultTaskRole
+        - !Ref OrderServiceTaskRole
+        - !Ref InventoryServiceTaskRole
+        - !Ref NotificationServiceTaskRole
+        - !Ref RecommendationServiceTaskRole
+
+  OrderServicePublishPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${EnvironmentName}-order-service-publish
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Sub arn:aws:sns:*:${AWS::AccountId}:${EnvironmentName}-order-events
+      Roles:
+        - !Ref OrderServiceTaskRole
+
+  InventoryServiceConsumePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${EnvironmentName}-inventory-service-consume
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-inventory-order-placed-queue
+      Roles:
+        - !Ref InventoryServiceTaskRole
+
+  NotificationServiceConsumePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${EnvironmentName}-notification-service-consume
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource:
+              - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-placed-queue
+              - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-status-changed-queue
+      Roles:
+        - !Ref NotificationServiceTaskRole
+
+  RecommendationServiceConsumePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${EnvironmentName}-recommendation-service-consume
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-recommendation-order-placed-queue
+      Roles:
+        - !Ref RecommendationServiceTaskRole
 
 Outputs:
   EcsTaskExecutionRoleArn:

@@ -20,7 +20,6 @@ Resources:
     Type: AWS::KMS::Key
     Properties:
       Description: !Sub Customer managed key for ${EnvironmentName} SNS/SQS message encryption
-      EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
         Statement:

@@ -44,8 +44,11 @@ if (app.Environment.IsDevelopment())
     await InventoryDataSeeder.SeedAsync(db, catalogClient, CancellationToken.None);
 }
 
-app.UseHttpsRedirection();
 app.UseCors();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseAuthentication();
 app.UseAuthorization();
 

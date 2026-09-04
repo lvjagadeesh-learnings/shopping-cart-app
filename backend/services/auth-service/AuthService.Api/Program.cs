@@ -40,8 +40,11 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
 }
 
-app.UseHttpsRedirection();
 app.UseCors();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseAuthentication();
 app.UseAuthorization();
 

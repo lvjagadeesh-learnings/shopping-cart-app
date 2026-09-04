@@ -16,11 +16,48 @@ Parameters:
     Description: Number of failed deliveries before a message moves to its DLQ.
 
 Resources:
+  MessagingKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub Customer managed key for ${EnvironmentName} SNS/SQS message encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowSnsServiceUse
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+          - Sid: AllowSqsServiceUse
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+
+  MessagingKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${EnvironmentName}-shopping-cart-messaging
+      TargetKeyId: !Ref MessagingKmsKey
+
   OrderEventsTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub ${EnvironmentName}-order-events
-      KmsMasterKeyId: alias/aws/sns
+      KmsMasterKeyId: !Ref MessagingKmsKey
 
   # --- Inventory subscriber (OrderPlaced only) ---
   InventoryOrderPlacedDlq:
@@ -28,14 +65,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
 
   InventoryOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-queue
       VisibilityTimeout: 60
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt InventoryOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -72,14 +109,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
 
   NotificationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-queue
       VisibilityTimeout: 60
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -116,14 +153,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-dlq
       MessageRetentionPeriod: 1209600
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
 
   NotificationOrderStatusChangedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-queue
       VisibilityTimeout: 60
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderStatusChangedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -160,14 +197,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
 
   RecommendationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-queue
       VisibilityTimeout: 60
-      SqsManagedSseEnabled: true
+      KmsMasterKeyId: !Ref MessagingKmsKey
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RecommendationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount

@@ -15,7 +15,10 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
 
         if (statusCode == 500)
         {
-            logger.LogError(exception, "Unhandled exception processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+            // Strip CR/LF from user-controlled request data to prevent log forging (CWE-117).
+            var method = SanitizeForLog(httpContext.Request.Method);
+            var path = SanitizeForLog(httpContext.Request.Path.Value);
+            logger.LogError(exception, "Unhandled exception processing {Method} {Path}", method, path);
         }
 
         httpContext.Response.StatusCode = statusCode;
@@ -29,6 +32,9 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
 
         return true;
     }
+
+    private static string SanitizeForLog(string? value) =>
+        value?.Replace("\r", string.Empty).Replace("\n", string.Empty) ?? string.Empty;
 }
 
 public static class ExceptionHandlingExtensions

@@ -21,16 +21,6 @@ on:
         required: false
         type: string
         default: ""
-      aws-region:
-        description: "AWS region (e.g. the caller's vars.AWS_REGION value; required if deploy is true)"
-        required: false
-        type: string
-        default: ""
-      aws-access-key-id:
-        description: "IAM user access key id (e.g. the caller's vars.AWS_ACCESS_KEY_ID value; required if deploy is true)"
-        required: false
-        type: string
-        default: ""
       environment:
         description: "GitHub Environment to bind for AWS secrets via secrets: inherit (required if deploy is true, e.g. sit/uat/prd)"
         required: false
@@ -113,11 +103,13 @@ jobs:
           path: dist
 
       - name: Configure AWS credentials (access key)
+        # vars.* here resolve against this job's environment-scoped Variables
+        # because the job declares `environment: ${{ inputs.environment }}` above.
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ inputs.aws-access-key-id }}
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.aws-region }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Sync to S3
         run: aws s3 sync dist "s3://${{ inputs.bucket-name }}" --delete

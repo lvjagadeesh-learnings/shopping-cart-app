@@ -164,3 +164,27 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --tags Environment=sit ManagedBy=github-actions ReleaseTag="${{ steps.tag.outputs.tag }}" \
             --no-fail-on-empty-changeset
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [detect-changes, publish-and-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Publish Docker Image Summary"
+            echo ""
+            echo "Backend changed since previous release: \`${{ needs.detect-changes.outputs.changed }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Publish & Deploy (all services, SIT) | ${{ needs.publish-and-deploy.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: needs.publish-and-deploy.result == 'failure'
+        run: |
+          echo "Publish & Deploy failed for one or more services."
+          exit 1

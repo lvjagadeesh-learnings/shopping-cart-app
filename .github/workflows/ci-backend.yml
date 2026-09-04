@@ -10,6 +10,12 @@ name: CI - Backend
 # staying pending), but the detect-changes job skips the actual build/test/scan jobs
 # when the push/PR touches no backend/** files.
 #
+# build -> unit-test run as a 9-way per-service matrix (one leg per microservice)
+# so a single service's failure is immediately obvious, while integration-test and
+# e2e-test run as single aggregate stages (they're no-op placeholders until this
+# repo has tests tagged Category=Integration / Category=E2E). code-scanning-backend
+# runs in parallel off detect-changes, not part of the linear chain.
+#
 # create-release-tag also runs from ci-frontend.yml on push to main (release tagging
 # is repo-wide, not backend/frontend scoped). Both share the `release-tagging`
 # concurrency group so only one actually creates the tag; the other sees the tag
@@ -50,17 +56,31 @@ jobs:
               - 'backend/**'
               - '.github/workflows/ci-backend.yml'
 
-  # All 9 services build together as one clear "Build" stage instead of a
-  # 9-way matrix, so the pipeline reads as a simple build -> unit test ->
-  # integration test -> code scanning sequence in the Actions UI.
-  build-backend:
-    name: Build
+  # Each of the 9 services builds/tests as its own matrix leg so a single
+  # service's failure is immediately obvious in the Actions UI, while the
+  # overall pipeline still reads as one clear build -> unit test ->
+  # integration test -> e2e test -> code scanning sequence.
+  build:
+    name: Build (${{ matrix.service.name }})
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: auth-service, project: AuthService }
+          - { name: catalog-service, project: CatalogService }
+          - { name: cart-service, project: CartService }
+          - { name: order-service, project: OrderService }
+          - { name: payment-service, project: PaymentService }
+          - { name: inventory-service, project: InventoryService }
+          - { name: notification-service, project: NotificationService }
+          - { name: review-service, project: ReviewService }
+          - { name: recommendation-service, project: RecommendationService }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -70,20 +90,29 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Build all services (excluding Aspire AppHost)
-        run: |
-          # AppHost requires the Aspire CLI bundle (not available on hosted
-          # runners) and isn't itself a source of deployable service logic.
-          set -euo pipefail
-          find . -name '*.csproj' ! -path '*/AppHost/*' -print0 | xargs -0 -n1 dotnet build --configuration Release
+      - name: Build service
+        run: dotnet build "services/${{ matrix.service.name }}/${{ matrix.service.project }}.Api/${{ matrix.service.project }}.Api.csproj" --configuration Release
 
-  unit-test-backend:
-    name: Unit Tests
-    needs: build-backend
+  unit-test:
+    name: Unit Tests (${{ matrix.service.name }})
+    needs: build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: auth-service, project: AuthService }
+          - { name: catalog-service, project: CatalogService }
+          - { name: cart-service, project: CartService }
+          - { name: order-service, project: OrderService }
+          - { name: payment-service, project: PaymentService }
+          - { name: inventory-service, project: InventoryService }
+          - { name: notification-service, project: NotificationService }
+          - { name: review-service, project: ReviewService }
+          - { name: recommendation-service, project: RecommendationService }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -93,22 +122,20 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Run unit tests for all services
-        run: |
-          set -euo pipefail
-          find . -name '*.Tests.csproj' -print0 | xargs -0 -n1 dotnet test --configuration Release --logger "trx;LogFileName=test-results.trx"
+      - name: Run unit tests
+        run: dotnet test "services/${{ matrix.service.name }}/${{ matrix.service.project }}.Tests/${{ matrix.service.project }}.Tests.csproj" --configuration Release --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-results
-          path: backend/**/TestResults/**/*.trx
+          name: unit-test-results-${{ matrix.service.name }}
+          path: backend/services/${{ matrix.service.name }}/${{ matrix.service.project }}.Tests/TestResults/**/*.trx
           if-no-files-found: ignore
 
   integration-test:
     name: Integration Tests
-    needs: unit-test-backend
+    needs: unit-test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -138,8 +165,37 @@ jobs:
             echo "No test project currently defines an Integration-category test; stage is a no-op placeholder until one is added." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-  # No backend e2e suite exists yet; add an `e2e-test` job here (mirroring
-  # ci-frontend.yml's placeholder) once one is introduced.
+  e2e-test:
+    name: End-to-End Tests
+    needs: integration-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run e2e test suites (Category=E2E)
+        run: |
+          set -euo pipefail
+          FOUND=0
+          for testcsproj in $(find . -name '*.Tests.csproj'); do
+            if grep -rl 'Category.*E2E' "$(dirname "$testcsproj")" >/dev/null 2>&1; then
+              FOUND=1
+              echo "::group::E2E tests - ${testcsproj}"
+              dotnet test "$testcsproj" --configuration Release --filter "Category=E2E" --logger "trx;LogFileName=e2e-results.trx"
+              echo "::endgroup::"
+            fi
+          done
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No test project currently defines an E2E-category test; stage is a no-op placeholder until one is added." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
   code-scanning-backend:
     name: Code Scanning (CodeQL - C#)
@@ -174,9 +230,10 @@ jobs:
     needs:
       [
         detect-changes,
-        build-backend,
-        unit-test-backend,
+        build,
+        unit-test,
         integration-test,
+        e2e-test,
         code-scanning-backend,
       ]
     runs-on: ubuntu-latest
@@ -190,17 +247,19 @@ jobs:
             echo ""
             echo "| Stage | Result |"
             echo "|---|---|"
-            echo "| Build | ${{ needs.build-backend.result }} |"
-            echo "| Unit Tests | ${{ needs.unit-test-backend.result }} |"
+            echo "| Build | ${{ needs.build.result }} |"
+            echo "| Unit Tests | ${{ needs.unit-test.result }} |"
             echo "| Integration Tests | ${{ needs.integration-test.result }} |"
+            echo "| End-to-End Tests | ${{ needs.e2e-test.result }} |"
             echo "| Code Scanning | ${{ needs.code-scanning-backend.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail summary if any required stage failed
         if: |
-          needs.build-backend.result == 'failure' ||
-          needs.unit-test-backend.result == 'failure' ||
+          needs.build.result == 'failure' ||
+          needs.unit-test.result == 'failure' ||
           needs.integration-test.result == 'failure' ||
+          needs.e2e-test.result == 'failure' ||
           needs.code-scanning-backend.result == 'failure'
         run: |
           echo "One or more backend CI stages failed."

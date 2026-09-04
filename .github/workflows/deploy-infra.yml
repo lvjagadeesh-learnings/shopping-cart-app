@@ -133,3 +133,55 @@ jobs:
       aws-region: ${{ vars.AWS_REGION }}
       aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
     secrets: inherit
+
+  summary:
+    name: Summary
+    if: always()
+    needs:
+      [
+        network,
+        database,
+        ecr,
+        ecs-cluster,
+        sns-sqs,
+        iam,
+        alb,
+        ecs-services,
+        frontend-hosting,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Deploy Infrastructure Summary"
+            echo ""
+            echo "Environment: \`${{ github.event.inputs.environment }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| network | ${{ needs.network.result }} |"
+            echo "| database | ${{ needs.database.result }} |"
+            echo "| ecr | ${{ needs.ecr.result }} |"
+            echo "| ecs-cluster | ${{ needs.ecs-cluster.result }} |"
+            echo "| sns-sqs | ${{ needs.sns-sqs.result }} |"
+            echo "| iam | ${{ needs.iam.result }} |"
+            echo "| alb | ${{ needs.alb.result }} |"
+            echo "| ecs-services (all) | ${{ needs.ecs-services.result }} |"
+            echo "| frontend-hosting | ${{ needs.frontend-hosting.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.network.result == 'failure' ||
+          needs.database.result == 'failure' ||
+          needs.ecr.result == 'failure' ||
+          needs.ecs-cluster.result == 'failure' ||
+          needs.sns-sqs.result == 'failure' ||
+          needs.iam.result == 'failure' ||
+          needs.alb.result == 'failure' ||
+          needs.ecs-services.result == 'failure' ||
+          needs.frontend-hosting.result == 'failure'
+        run: |
+          echo "One or more infrastructure stacks failed to deploy."
+          exit 1

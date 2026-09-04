@@ -179,3 +179,27 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --tags Environment="${TARGET_ENV}" ManagedBy=github-actions ReleaseTag="${{ inputs.release-tag }}" PromotedFrom="${SOURCE_ENV}" \
             --no-fail-on-empty-changeset
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [resolve-source, promote]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Promote Docker Image Summary"
+            echo ""
+            echo "Promoting \`${{ inputs.release-tag }}\`: \`${{ needs.resolve-source.outputs.source-env }}\` -> \`${{ inputs.target-environment }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Promote (all services) | ${{ needs.promote.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: needs.promote.result == 'failure'
+        run: |
+          echo "Promote failed for one or more services."
+          exit 1

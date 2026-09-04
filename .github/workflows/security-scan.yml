@@ -48,3 +48,25 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [vulnerability-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Security Scan Summary"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Vulnerability Checks | ${{ needs.vulnerability-scan.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: needs.vulnerability-scan.result == 'failure'
+        run: |
+          echo "Security scan failed."
+          exit 1

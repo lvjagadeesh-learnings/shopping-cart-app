@@ -1,5 +1,7 @@
-name: Deploy - Frontend
+name: Publish - Frontend
 
+# Stage 3 (frontend) of the pipeline: CI -> Create Release Tag -> Publish Frontend
+#
 # Auto-triggered by a published release (deploys to SIT; detect-changes diffs
 # frontend/ between this tag and the previous release tag and skips the deploy
 # entirely if nothing changed, e.g. a release cut purely for backend changes).
@@ -106,3 +108,30 @@ jobs:
       aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
       environment: ${{ github.event.inputs.environment || 'sit' }}
     secrets: inherit
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [detect-changes, resolve-stack-outputs, build-and-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Publish Frontend Summary"
+            echo ""
+            echo "Frontend changed since previous release: \`${{ needs.detect-changes.outputs.changed }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Resolve Stack Outputs | ${{ needs.resolve-stack-outputs.result }} |"
+            echo "| Build, Test & Deploy | ${{ needs.build-and-deploy.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.resolve-stack-outputs.result == 'failure' ||
+          needs.build-and-deploy.result == 'failure'
+        run: |
+          echo "Publish Frontend failed."
+          exit 1

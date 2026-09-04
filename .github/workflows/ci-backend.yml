@@ -118,9 +118,14 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: csharp
+          build-mode: manual
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Build (excluding Aspire AppHost)
+        run: |
+          # AppHost requires the Aspire CLI bundle (not available on hosted
+          # runners) and isn't itself a source of application logic to scan.
+          set -euo pipefail
+          find backend -name '*.csproj' ! -path '*/AppHost/*' -print0 | xargs -0 -n1 dotnet build --configuration Debug
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

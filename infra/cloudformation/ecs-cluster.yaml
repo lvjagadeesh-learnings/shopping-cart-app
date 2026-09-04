@@ -26,12 +26,12 @@ Resources:
         - CapacityProvider: FARGATE_SPOT
           Weight: 4
 
-  EcsServiceNamespace:
-    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
-    Properties:
-      Name: !Sub ${EnvironmentName}.shopping-cart.local
-      Vpc:
-        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+  # NOTE: the AWS::ServiceDiscovery::PrivateDnsNamespace resource that used to
+  # live here was removed - the sandbox account's SCP denies
+  # servicediscovery:TagResource, which CloudFormation invokes automatically
+  # via stack-level --tags propagation. The namespace was unused (no other
+  # template imported ServiceDiscoveryNamespaceId), so it was deleted rather
+  # than worked around.
 
 Outputs:
   ClusterName:
@@ -43,8 +43,3 @@ Outputs:
     Value: !GetAtt EcsCluster.Arn
     Export:
       Name: !Sub ${EnvironmentName}-EcsClusterArn
-
-  ServiceDiscoveryNamespaceId:
-    Value: !Ref EcsServiceNamespace
-    Export:
-      Name: !Sub ${EnvironmentName}-ServiceDiscoveryNamespaceId

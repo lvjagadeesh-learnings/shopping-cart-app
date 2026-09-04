@@ -36,8 +36,11 @@ if (app.Environment.IsDevelopment())
     await db.Database.MigrateAsync();
 }
 
-app.UseHttpsRedirection();
 app.UseCors();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseAuthentication();
 app.UseAuthorization();
 

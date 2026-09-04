@@ -4,15 +4,11 @@ on:
   workflow_call:
     inputs:
       deploy:
-        description: "If true, sync build output to S3 and invalidate CloudFront (requires bucket-name/distribution-id/aws-access-key-id)"
+        description: "If true, sync build output to S3 (requires bucket-name/aws-access-key-id). No CDN: the sandbox SCP denies cloudfront:CreateDistribution, so the site is served directly from S3 static website hosting."
         required: false
         type: boolean
         default: false
       bucket-name:
-        required: false
-        type: string
-        default: ""
-      distribution-id:
         required: false
         type: string
         default: ""
@@ -113,6 +109,3 @@ jobs:
 
       - name: Sync to S3
         run: aws s3 sync dist "s3://${{ inputs.bucket-name }}" --delete
-
-      - name: Invalidate CloudFront
-        run: aws cloudfront create-invalidation --distribution-id "${{ inputs.distribution-id }}" --paths "/*"

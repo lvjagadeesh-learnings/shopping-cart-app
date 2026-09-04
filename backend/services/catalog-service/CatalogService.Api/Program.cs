@@ -32,8 +32,11 @@ if (app.Environment.IsDevelopment())
     await CatalogSeeder.SeedAsync(db);
 }
 
-app.UseHttpsRedirection();
 app.UseCors();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseAuthentication();
 app.UseAuthorization();
 

@@ -23,7 +23,8 @@ var cartApi = builder.AddProject<Projects.CartService_Api>("cart-service")
 
 var inventoryApi = builder.AddProject<Projects.InventoryService_Api>("inventory-service")
     .WithReference(shoppingCartDb)
-    .WaitFor(shoppingCartDb);
+    .WaitFor(shoppingCartDb)
+    .WithReference(catalogApi);
 
 var paymentApi = builder.AddProject<Projects.PaymentService_Api>("payment-service")
     .WithReference(shoppingCartDb)

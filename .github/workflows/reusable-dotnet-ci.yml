@@ -30,12 +30,12 @@ on:
         type: string
         default: "latest"
       aws-region:
-        description: "AWS region, e.g. ${{ vars.AWS_REGION }} (required if image-repository is set)"
+        description: "AWS region (e.g. the caller's vars.AWS_REGION value; required if image-repository is set)"
         required: false
         type: string
         default: ""
       aws-access-key-id:
-        description: "IAM user access key id, e.g. ${{ vars.AWS_ACCESS_KEY_ID }} (required if image-repository is set)"
+        description: "IAM user access key id (e.g. the caller's vars.AWS_ACCESS_KEY_ID value; required if image-repository is set)"
         required: false
         type: string
         default: ""

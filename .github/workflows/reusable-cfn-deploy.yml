@@ -29,11 +29,11 @@ on:
         type: string
         default: ""
       aws-region:
-        description: "AWS region, e.g. ${{ vars.AWS_REGION }} — always passed explicitly by the caller, no hardcoded default"
+        description: "AWS region (e.g. the caller's vars.AWS_REGION value) — always passed explicitly by the caller, no hardcoded default"
         required: true
         type: string
       aws-access-key-id:
-        description: "IAM user access key id, e.g. ${{ vars.AWS_ACCESS_KEY_ID }}"
+        description: "IAM user access key id (e.g. the caller's vars.AWS_ACCESS_KEY_ID value)"
         required: true
         type: string
     outputs:
@@ -47,6 +47,7 @@ jobs:
   deploy:
     name: Deploy ${{ inputs.stack-name }}
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     outputs:
       stack-id: ${{ steps.deploy.outputs.stack-id }}
     steps:

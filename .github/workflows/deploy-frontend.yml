@@ -96,7 +96,6 @@ jobs:
     if: |
       always() &&
       (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.changed == 'true')
-    environment: ${{ github.event.inputs.environment || 'sit' }}
     uses: ./.github/workflows/reusable-frontend-ci.yml
     with:
       deploy: true
@@ -105,4 +104,5 @@ jobs:
       api-base-url: http://${{ needs.resolve-stack-outputs.outputs.alb-dns-name }}
       aws-region: ${{ vars.AWS_REGION }}
       aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+      environment: ${{ github.event.inputs.environment || 'sit' }}
     secrets: inherit

@@ -22,12 +22,17 @@ on:
         type: string
         default: ""
       aws-region:
-        description: "AWS region, e.g. ${{ vars.AWS_REGION }} (required if deploy is true)"
+        description: "AWS region (e.g. the caller's vars.AWS_REGION value; required if deploy is true)"
         required: false
         type: string
         default: ""
       aws-access-key-id:
-        description: "IAM user access key id, e.g. ${{ vars.AWS_ACCESS_KEY_ID }} (required if deploy is true)"
+        description: "IAM user access key id (e.g. the caller's vars.AWS_ACCESS_KEY_ID value; required if deploy is true)"
+        required: false
+        type: string
+        default: ""
+      environment:
+        description: "GitHub Environment to bind for AWS secrets via secrets: inherit (required if deploy is true, e.g. sit/uat/prd)"
         required: false
         type: string
         default: ""
@@ -39,6 +44,7 @@ jobs:
   build-test:
     name: Build, Lint & Test (frontend)
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     defaults:
       run:
         working-directory: frontend

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* Shopee-inspired orange/red brand palette */
+  /* Orange/red brand palette */
   --color-brand-50: #fff4ed;
   --color-brand-100: #ffe6d5;
   --color-brand-200: #ffc9aa;

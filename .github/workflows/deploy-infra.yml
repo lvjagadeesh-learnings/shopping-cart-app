@@ -16,6 +16,10 @@ permissions:
 jobs:
   network:
     name: network
+    # environment must be declared here (not just passed as an input) so that
+    # vars.AWS_REGION / vars.AWS_ACCESS_KEY_ID resolve against this job's
+    # environment-scoped Variables rather than coming back empty.
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-network
@@ -29,6 +33,7 @@ jobs:
   database:
     name: database
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-database
@@ -42,6 +47,7 @@ jobs:
   ecr:
     name: ecr
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecr
@@ -55,6 +61,7 @@ jobs:
   ecs-cluster:
     name: ecs-cluster
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecs-cluster
@@ -68,6 +75,7 @@ jobs:
   sns-sqs:
     name: sns-sqs
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-sns-sqs
@@ -81,6 +89,7 @@ jobs:
   iam:
     name: iam
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-iam
@@ -94,6 +103,7 @@ jobs:
   alb:
     name: alb
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-alb
@@ -111,6 +121,7 @@ jobs:
       fail-fast: false
       matrix:
         service: [auth, catalog, cart, order, payment, inventory, notification, review, recommendation]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecs-service-${{ matrix.service }}
@@ -124,6 +135,7 @@ jobs:
   frontend-hosting:
     name: s3-cloudfront-frontend
     needs: [network]
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-frontend

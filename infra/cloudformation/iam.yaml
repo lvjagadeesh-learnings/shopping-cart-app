@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - IAM roles for ECS tasks: a shared task execution role
+  (pull from ECR, write CloudWatch Logs, read the DB secret) plus per-service
+  task roles that grant only the extra permissions each service actually
+  needs (SNS publish for Order, SQS consume for Inventory/Notification/
+  Recommendation). Uses naming-convention-scoped resource ARNs so this stack
+  has no hard dependency on the sns-sqs.yaml stack's exact export values.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+Resources:
+  # Shared by every ECS task definition: pulls images from ECR, writes logs,
+  # and reads the Aurora master-credentials secret so Npgsql connection
+  # strings can be resolved at container start.
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+
+  # Default task role for services with no special AWS permissions
+  # (Auth, Catalog, Cart, Payment). Read-only access to its own DB secret.
+  EcsDefaultTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-default-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+
+  # Order Service: publishes OrderPlaced/OrderStatusChanged events to SNS.
+  OrderServiceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-order-service-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+        - PolicyName: publish-order-events
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Sub arn:aws:sns:*:${AWS::AccountId}:${EnvironmentName}-order-events
+
+  # Inventory, Notification, Recommendation: consume OrderPlaced (and, for
+  # Notification, OrderStatusChanged) events from their own SQS queue.
+  InventoryServiceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-inventory-service-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+        - PolicyName: consume-order-placed-queue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-inventory-order-placed-queue
+
+  NotificationServiceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-notification-service-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+        - PolicyName: consume-notification-queues
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-placed-queue
+                  - !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-notification-order-status-changed-queue
+
+  RecommendationServiceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-recommendation-service-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${EnvironmentName}/shopping-cart/*
+        - PolicyName: consume-order-placed-queue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub arn:aws:sqs:*:${AWS::AccountId}:${EnvironmentName}-recommendation-order-placed-queue
+
+Outputs:
+  EcsTaskExecutionRoleArn:
+    Value: !GetAtt EcsTaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-EcsTaskExecutionRoleArn
+
+  EcsDefaultTaskRoleArn:
+    Value: !GetAtt EcsDefaultTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-EcsDefaultTaskRoleArn
+
+  OrderServiceTaskRoleArn:
+    Value: !GetAtt OrderServiceTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-OrderServiceTaskRoleArn
+
+  InventoryServiceTaskRoleArn:
+    Value: !GetAtt InventoryServiceTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-InventoryServiceTaskRoleArn
+
+  NotificationServiceTaskRoleArn:
+    Value: !GetAtt NotificationServiceTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-NotificationServiceTaskRoleArn
+
+  RecommendationServiceTaskRoleArn:
+    Value: !GetAtt RecommendationServiceTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-RecommendationServiceTaskRoleArn

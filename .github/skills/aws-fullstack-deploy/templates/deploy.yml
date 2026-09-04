@@ -1,0 +1,85 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # required for OIDC AWS role assumption
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_BACKEND_REPO: app-backend
+  ECR_FRONTEND_REPO: app-frontend
+  ECS_CLUSTER: app-cluster
+  ECS_BACKEND_SERVICE: app-backend-service
+  ECS_FRONTEND_SERVICE: app-frontend-service
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Replace with the app's real test commands (dotnet test, npm test, etc.)
+      - run: echo "run backend + frontend tests here"
+
+  build-and-push:
+    needs: build-test
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.vars.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        run: |
+          docker build -t "$ECR_BACKEND_REPO:${{ steps.vars.outputs.sha }}" -f Dockerfile.backend .
+          docker tag "$ECR_BACKEND_REPO:${{ steps.vars.outputs.sha }}" "<ACCOUNT_ID>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:${{ steps.vars.outputs.sha }}"
+          docker push "<ACCOUNT_ID>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:${{ steps.vars.outputs.sha }}"
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t "$ECR_FRONTEND_REPO:${{ steps.vars.outputs.sha }}" -f Dockerfile.frontend .
+          docker tag "$ECR_FRONTEND_REPO:${{ steps.vars.outputs.sha }}" "<ACCOUNT_ID>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_FRONTEND_REPO:${{ steps.vars.outputs.sha }}"
+          docker push "<ACCOUNT_ID>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_FRONTEND_REPO:${{ steps.vars.outputs.sha }}"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production   # requires manual approval if configured in repo settings
+    env:
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Image-only update (fast path). Use `cdk deploy` instead when infra/task-def changes.
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_BACKEND_SERVICE" --force-new-deployment
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_FRONTEND_SERVICE" --force-new-deployment
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" "$ECS_FRONTEND_SERVICE"
+
+      - name: Post-deploy health check
+        run: |
+          curl -fsS "https://<ALB_DNS_NAME>/health"

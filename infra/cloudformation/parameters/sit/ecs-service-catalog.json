@@ -1,0 +1,17 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "sit" },
+  { "ParameterKey": "ServiceName", "ParameterValue": "catalog-service" },
+  { "ParameterKey": "ContainerImage", "ParameterValue": "REPLACED_AT_DEPLOY_TIME_BY_CI" },
+  { "ParameterKey": "ContainerPort", "ParameterValue": "8080" },
+  { "ParameterKey": "HealthCheckPath", "ParameterValue": "/health" },
+  { "ParameterKey": "PathPattern", "ParameterValue": "/api/catalog/*" },
+  { "ParameterKey": "ListenerRulePriority", "ParameterValue": "110" },
+  { "ParameterKey": "TaskRoleType", "ParameterValue": "Default" },
+  { "ParameterKey": "Cpu", "ParameterValue": "256" },
+  { "ParameterKey": "Memory", "ParameterValue": "512" },
+  { "ParameterKey": "DesiredCount", "ParameterValue": "1" },
+  { "ParameterKey": "MinCapacity", "ParameterValue": "1" },
+  { "ParameterKey": "MaxCapacity", "ParameterValue": "2" },
+  { "ParameterKey": "TargetCpuUtilization", "ParameterValue": "60" },
+  { "ParameterKey": "LogRetentionInDays", "ParameterValue": "14" }
+]

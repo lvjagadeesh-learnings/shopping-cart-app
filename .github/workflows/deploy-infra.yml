@@ -1,0 +1,187 @@
+name: Deploy - Infrastructure (CloudFormation)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: sit
+        type: choice
+        options: [sit, uat, prd]
+
+permissions:
+  contents: read
+
+jobs:
+  network:
+    name: network
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-network
+      template-path: infra/cloudformation/network.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/network.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  database:
+    name: database
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-database
+      template-path: infra/cloudformation/database.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/database.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  ecr:
+    name: ecr
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecr
+      template-path: infra/cloudformation/ecr.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/ecr.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  ecs-cluster:
+    name: ecs-cluster
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecs-cluster
+      template-path: infra/cloudformation/ecs-cluster.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/ecs-cluster.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  sns-sqs:
+    name: sns-sqs
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-sns-sqs
+      template-path: infra/cloudformation/sns-sqs.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/sns-sqs.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  iam:
+    name: iam
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-iam
+      template-path: infra/cloudformation/iam.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/iam.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  alb:
+    name: alb
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-alb
+      template-path: infra/cloudformation/alb.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/alb.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  ecs-services:
+    name: ecs-service (${{ matrix.service }})
+    needs: [database, ecr, ecs-cluster, sns-sqs, iam, alb]
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, catalog, cart, order, payment, inventory, notification, review, recommendation]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecs-service-${{ matrix.service }}
+      template-path: infra/cloudformation/ecs-service.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/ecs-service-${{ matrix.service }}.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  frontend-hosting:
+    name: s3-cloudfront-frontend
+    needs: [network]
+    uses: ./.github/workflows/reusable-cfn-deploy.yml
+    with:
+      stack-name: ${{ github.event.inputs.environment }}-shopping-cart-frontend
+      template-path: infra/cloudformation/s3-cloudfront-frontend.yaml
+      parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/s3-cloudfront-frontend.json
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+    secrets: inherit
+
+  summary:
+    name: Summary
+    if: always()
+    needs:
+      [
+        network,
+        database,
+        ecr,
+        ecs-cluster,
+        sns-sqs,
+        iam,
+        alb,
+        ecs-services,
+        frontend-hosting,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Deploy Infrastructure Summary"
+            echo ""
+            echo "Environment: \`${{ github.event.inputs.environment }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| network | ${{ needs.network.result }} |"
+            echo "| database | ${{ needs.database.result }} |"
+            echo "| ecr | ${{ needs.ecr.result }} |"
+            echo "| ecs-cluster | ${{ needs.ecs-cluster.result }} |"
+            echo "| sns-sqs | ${{ needs.sns-sqs.result }} |"
+            echo "| iam | ${{ needs.iam.result }} |"
+            echo "| alb | ${{ needs.alb.result }} |"
+            echo "| ecs-services (all) | ${{ needs.ecs-services.result }} |"
+            echo "| frontend-hosting | ${{ needs.frontend-hosting.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.network.result == 'failure' ||
+          needs.database.result == 'failure' ||
+          needs.ecr.result == 'failure' ||
+          needs.ecs-cluster.result == 'failure' ||
+          needs.sns-sqs.result == 'failure' ||
+          needs.iam.result == 'failure' ||
+          needs.alb.result == 'failure' ||
+          needs.ecs-services.result == 'failure' ||
+          needs.frontend-hosting.result == 'failure'
+        run: |
+          echo "One or more infrastructure stacks failed to deploy."
+          exit 1

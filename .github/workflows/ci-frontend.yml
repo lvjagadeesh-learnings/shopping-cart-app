@@ -1,0 +1,195 @@
+name: CI - Frontend
+
+# Stage 1 (frontend) of the pipeline: CI -> Create Release Tag -> Publish Frontend
+#
+# Runs on every PR (merge gate, no release) and on every push to main (merge gate +
+# chains into the reusable release-tag workflow to cut a new version when the
+# Conventional Commits since the last tag warrant one).
+#
+# The workflow always triggers (so required PR status checks resolve instead of
+# staying pending), but the detect-changes job skips the actual build/test/scan jobs
+# when the push/PR touches no frontend/** files.
+#
+# build-unit-test-frontend calls the reusable build+unit-test+deploy workflow with
+# deploy left false, so CI only ever builds/tests — never deploys. integration-test
+# and e2e-test are no-op placeholders until this repo has dedicated test scripts for
+# them. code-scanning-frontend runs in parallel off detect-changes, not part of the
+# linear chain.
+#
+# create-release-tag also runs from ci-backend.yml on push to main (release tagging
+# is repo-wide, not backend/frontend scoped). Both share the `release-tagging`
+# concurrency group so only one actually creates the tag; the other sees the tag
+# already exists (via reusable-release-tag.yml's own "no commits since last tag"
+# check) and no-ops.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ci-frontend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  security-events: write
+  actions: read
+
+jobs:
+  detect-changes:
+    name: Detect frontend changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci-frontend.yml'
+              - '.github/workflows/reusable-frontend-ci.yml'
+
+  build-unit-test-frontend:
+    name: Build & Unit Test (frontend)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    uses: ./.github/workflows/reusable-frontend-ci.yml
+
+  integration-test:
+    name: Integration Tests
+    needs: build-unit-test-frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration suite (if configured)
+        run: |
+          set -euo pipefail
+          if npm run | grep -q '^  test:integration'; then
+            npm run test:integration
+          else
+            echo "No 'test:integration' npm script configured yet; stage is a no-op placeholder until integration tests are added." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  e2e-test:
+    name: End-to-End Tests
+    needs: integration-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run e2e suite (if configured)
+        run: |
+          set -euo pipefail
+          if npm run | grep -q '^  test:e2e'; then
+            npm run test:e2e
+          else
+            echo "No 'test:e2e' npm script configured yet; stage is a no-op placeholder until Playwright/Cypress e2e tests are added." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  code-scanning-frontend:
+    name: Code Scanning (CodeQL - JS/TS)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  summary:
+    name: Summary
+    if: always()
+    needs:
+      [
+        detect-changes,
+        build-unit-test-frontend,
+        integration-test,
+        e2e-test,
+        code-scanning-frontend,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Frontend CI Summary"
+            echo ""
+            echo "Frontend changed: \`${{ needs.detect-changes.outputs.frontend }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Build & Unit Test | ${{ needs.build-unit-test-frontend.result }} |"
+            echo "| Integration Tests | ${{ needs.integration-test.result }} |"
+            echo "| End-to-End Tests | ${{ needs.e2e-test.result }} |"
+            echo "| Code Scanning | ${{ needs.code-scanning-frontend.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.build-unit-test-frontend.result == 'failure' ||
+          needs.integration-test.result == 'failure' ||
+          needs.e2e-test.result == 'failure' ||
+          needs.code-scanning-frontend.result == 'failure'
+        run: |
+          echo "One or more frontend CI stages failed."
+          exit 1
+
+  create-release-tag:
+    name: Create Release Tag
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [summary]
+    concurrency:
+      group: release-tagging
+      cancel-in-progress: false
+    uses: ./.github/workflows/reusable-release-tag.yml
+    permissions:
+      contents: write

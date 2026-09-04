@@ -1,0 +1,137 @@
+name: Publish - Frontend
+
+# Stage 3 (frontend) of the pipeline: CI -> Create Release Tag -> Publish Frontend
+#
+# Auto-triggered by a published release (deploys to SIT; detect-changes diffs
+# frontend/ between this tag and the previous release tag and skips the deploy
+# entirely if nothing changed, e.g. a release cut purely for backend changes).
+# Also manually dispatchable to any environment (sit/uat/prd) — a manual dispatch
+# always deploys regardless of change detection.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [sit, uat, prd]
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect frontend changes since previous release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Diff frontend/ since previous release tag
+        id: diff
+        run: |
+          set -euo pipefail
+          CURRENT_TAG="${{ github.event.release.tag_name }}"
+          PREV_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n "/^${CURRENT_TAG}\$/{n;p}")
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous release tag found; treating as changed (first release)."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Comparing ${PREV_TAG}..${CURRENT_TAG} for frontend/ changes"
+          if git diff --quiet "${PREV_TAG}..${CURRENT_TAG}" -- frontend/; then
+            echo "No frontend/ changes since ${PREV_TAG}; skipping deploy."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  resolve-stack-outputs:
+    name: Resolve frontend stack outputs
+    needs: detect-changes
+    if: |
+      always() &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.changed == 'true')
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'sit' }}
+    outputs:
+      bucket-name: ${{ steps.outputs.outputs.bucket-name }}
+      distribution-id: ${{ steps.outputs.outputs.distribution-id }}
+      alb-dns-name: ${{ steps.outputs.outputs.alb-dns-name }}
+    steps:
+      - name: Configure AWS credentials (access key)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Read CloudFormation outputs
+        id: outputs
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'sit' }}"
+          FRONTEND_STACK="${ENVIRONMENT}-shopping-cart-frontend"
+          ALB_STACK="${ENVIRONMENT}-shopping-cart-alb"
+
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "$FRONTEND_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          DIST_ID=$(aws cloudformation describe-stacks --stack-name "$FRONTEND_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" --output text)
+          ALB_DNS=$(aws cloudformation describe-stacks --stack-name "$ALB_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
+
+          echo "bucket-name=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "distribution-id=${DIST_ID}" >> "$GITHUB_OUTPUT"
+          echo "alb-dns-name=${ALB_DNS}" >> "$GITHUB_OUTPUT"
+
+  build-and-deploy:
+    name: Build, Test & Deploy Frontend
+    needs: [detect-changes, resolve-stack-outputs]
+    if: |
+      always() &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.changed == 'true')
+    uses: ./.github/workflows/reusable-frontend-ci.yml
+    with:
+      deploy: true
+      bucket-name: ${{ needs.resolve-stack-outputs.outputs.bucket-name }}
+      distribution-id: ${{ needs.resolve-stack-outputs.outputs.distribution-id }}
+      api-base-url: http://${{ needs.resolve-stack-outputs.outputs.alb-dns-name }}
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+      environment: ${{ github.event.inputs.environment || 'sit' }}
+    secrets: inherit
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [detect-changes, resolve-stack-outputs, build-and-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Publish Frontend Summary"
+            echo ""
+            echo "Frontend changed since previous release: \`${{ needs.detect-changes.outputs.changed }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Resolve Stack Outputs | ${{ needs.resolve-stack-outputs.result }} |"
+            echo "| Build, Test & Deploy | ${{ needs.build-and-deploy.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.resolve-stack-outputs.result == 'failure' ||
+          needs.build-and-deploy.result == 'failure'
+        run: |
+          echo "Publish Frontend failed."
+          exit 1

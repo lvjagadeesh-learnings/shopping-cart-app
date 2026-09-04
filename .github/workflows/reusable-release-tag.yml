@@ -1,0 +1,126 @@
+name: Reusable - Create Release Tag (Conventional Commits)
+
+# Bumps a semantic version tag and creates a GitHub Release based on the
+# Conventional Commits (https://www.conventionalcommits.org/en/v1.0.0/) found
+# since the last release tag. Bump rules (per the conventional-commit skill
+# installed via `gh skill install github/awesome-copilot conventional-commit`,
+# see .agents/skills/conventional-commit/SKILL.md):
+#   - any commit subject/body containing "BREAKING CHANGE:" or a "!" before
+#     the ":" (e.g. "feat!:", "fix(api)!:")            -> MAJOR bump
+#   - any commit with type "feat"                       -> MINOR bump
+#   - any commit with type "fix" (and no feat/breaking)  -> PATCH bump
+#   - only "chore"/"docs"/"style"/"test"/"ci"/"build"/"refactor"/"perf"/"revert"
+#     commits, nothing else                              -> no release created
+#
+# This is a reusable (workflow_call) workflow — see ci-backend.yml / ci-frontend.yml
+# for the two callers (shared `release-tagging` concurrency group so only one of them
+# actually creates the tag per push to main).
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: "Compute the next version and print it, but do not create a tag or release"
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      released:
+        description: "true if a new tag/release was created"
+        value: ${{ jobs.tag.outputs.released }}
+      new-tag:
+        description: "The new tag (e.g. v1.4.0), only set if released is true"
+        value: ${{ jobs.tag.outputs.new-tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Bump version & create release
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.bump.outputs.released }}
+      new-tag: ${{ steps.bump.outputs.new-tag }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine bump type & compute next version
+        id: bump
+        run: |
+          set -euo pipefail
+
+          LAST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)
+          if [ -z "$LAST_TAG" ]; then
+            LAST_TAG="v0.0.0"
+            RANGE="HEAD"
+            echo "No previous release tag found; considering full history."
+          else
+            RANGE="${LAST_TAG}..HEAD"
+          fi
+          echo "Last tag: ${LAST_TAG}"
+
+          COMMITS=$(git log ${RANGE} --pretty=format:'%s%n%b---END---' || true)
+          if [ -z "$COMMITS" ]; then
+            echo "No commits since ${LAST_TAG}; skipping release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUMP="none"
+          if echo "$COMMITS" | grep -Eiq '(^|[^A-Za-z])BREAKING CHANGE:|^[a-z]+(\([^)]*\))?!:'; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -Eq '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -Eq '^fix(\([^)]*\))?:'; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "Only non-release commit types (chore/docs/style/test/ci/build/refactor/perf/revert) found; skipping release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION="${LAST_TAG#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Bump type: ${BUMP} -> ${NEW_TAG}"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "new-tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "last-tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag & GitHub Release
+        if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NEW_TAG="${{ steps.bump.outputs.new-tag }}"
+          LAST_TAG="${{ steps.bump.outputs.last-tag }}"
+
+          git tag -a "${NEW_TAG}" -m "Release ${NEW_TAG}"
+          git push origin "${NEW_TAG}"
+
+          gh release create "${NEW_TAG}" \
+            --title "${NEW_TAG}" \
+            --generate-notes \
+            --notes-start-tag "${LAST_TAG}"
+
+      - name: Dry-run summary
+        if: inputs.dry-run == true
+        run: |
+          echo "### Release Tag (dry run)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Would release: **${{ steps.bump.outputs.new-tag || 'none' }}**" >> "$GITHUB_STEP_SUMMARY"

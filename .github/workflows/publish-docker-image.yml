@@ -1,0 +1,190 @@
+name: Publish Docker Image
+
+# Stage 3 of the pipeline: CI -> Create Release Tag -> Publish Docker Image -> Promote Docker Image
+#
+# Builds, scans, and pushes all 9 backend service images to the SIT ECR repositories
+# for a given release tag, then deploys SIT's ecs-service stacks pinned to the
+# resulting image DIGEST (never a mutable tag). SIT is the only environment this
+# workflow ever deploys to — promotion to UAT/PRD is handled exclusively by
+# promote-docker-image.yml, which re-uses these already-published images.
+#
+# On a `release` event, detect-changes diffs backend/ between this tag and the
+# previous release tag and skips publish-and-deploy entirely if nothing changed
+# (a release cut purely for frontend changes). A manual workflow_dispatch always
+# publishes/deploys regardless of change detection.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: "Existing release tag to (re)publish to SIT, e.g. v1.4.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect backend changes since previous release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Diff backend/ since previous release tag
+        id: diff
+        run: |
+          set -euo pipefail
+          CURRENT_TAG="${{ github.event.release.tag_name }}"
+          PREV_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n "/^${CURRENT_TAG}\$/{n;p}")
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous release tag found; treating as changed (first release)."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Comparing ${PREV_TAG}..${CURRENT_TAG} for backend/ changes"
+          if git diff --quiet "${PREV_TAG}..${CURRENT_TAG}" -- backend/; then
+            echo "No backend/ changes since ${PREV_TAG}; skipping publish & deploy."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-and-deploy:
+    name: Publish & Deploy (${{ matrix.service.name }})
+    needs: detect-changes
+    if: |
+      always() &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.changed == 'true')
+    environment: sit
+    runs-on: ubuntu-latest
+    # AWS_REGION is read here (not at workflow level) so it resolves against the
+    # sit environment's scoped variable, not a repo-level fallback.
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TARGET_ENV: sit
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: auth-service, repo-suffix: auth, dockerfile: services/auth-service/Dockerfile }
+          - { name: catalog-service, repo-suffix: catalog, dockerfile: services/catalog-service/Dockerfile }
+          - { name: cart-service, repo-suffix: cart, dockerfile: services/cart-service/Dockerfile }
+          - { name: order-service, repo-suffix: order, dockerfile: services/order-service/Dockerfile }
+          - { name: payment-service, repo-suffix: payment, dockerfile: services/payment-service/Dockerfile }
+          - { name: inventory-service, repo-suffix: inventory, dockerfile: services/inventory-service/Dockerfile }
+          - { name: notification-service, repo-suffix: notification, dockerfile: services/notification-service/Dockerfile }
+          - { name: review-service, repo-suffix: review, dockerfile: services/review-service/Dockerfile }
+          - { name: recommendation-service, repo-suffix: recommendation, dockerfile: services/recommendation-service/Dockerfile }
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.release-tag }}"
+          if [ -z "$TAG" ]; then
+            echo "No release tag resolved (neither release event nor workflow_dispatch input provided one)." >&2
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout at release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Secret leak scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Configure AWS credentials (access key)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: |
+          docker build \
+            -f "backend/${{ matrix.service.dockerfile }}" \
+            -t "local/${{ matrix.service.name }}:${{ steps.tag.outputs.tag }}" \
+            backend
+
+      - name: Trivy image vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: "local/${{ matrix.service.name }}:${{ steps.tag.outputs.tag }}"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Tag & push to SIT ECR
+        id: push
+        run: |
+          set -euo pipefail
+          REPO="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/sit-${{ matrix.service.repo-suffix }}-service"
+          docker tag "local/${{ matrix.service.name }}:${{ steps.tag.outputs.tag }}" "${REPO}:${{ steps.tag.outputs.tag }}"
+          docker push "${REPO}:${{ steps.tag.outputs.tag }}"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve pushed image digest
+        id: digest
+        run: |
+          set -euo pipefail
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "sit-${{ matrix.service.repo-suffix }}-service" \
+            --image-ids imageTag="${{ steps.tag.outputs.tag }}" \
+            --query "imageDetails[0].imageDigest" --output text)
+          echo "Resolved digest: ${DIGEST}"
+          echo "image-uri=${{ steps.push.outputs.repo }}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy SIT ecs-service stack (digest-pinned)
+        run: |
+          set -euo pipefail
+          PARAMS_FILE="infra/cloudformation/parameters/sit/ecs-service-${{ matrix.service.repo-suffix }}.json"
+          OVERRIDES=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${PARAMS_FILE}" | tr '\n' ' ')
+
+          aws cloudformation deploy \
+            --stack-name "sit-shopping-cart-ecs-service-${{ matrix.service.repo-suffix }}" \
+            --template-file infra/cloudformation/ecs-service.yaml \
+            --parameter-overrides ${OVERRIDES} "ContainerImage=${{ steps.digest.outputs.image-uri }}" \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --tags Environment=sit ManagedBy=github-actions ReleaseTag="${{ steps.tag.outputs.tag }}" \
+            --no-fail-on-empty-changeset
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [detect-changes, publish-and-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Publish Docker Image Summary"
+            echo ""
+            echo "Backend changed since previous release: \`${{ needs.detect-changes.outputs.changed }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Publish & Deploy (all services, SIT) | ${{ needs.publish-and-deploy.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: needs.publish-and-deploy.result == 'failure'
+        run: |
+          echo "Publish & Deploy failed for one or more services."
+          exit 1

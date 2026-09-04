@@ -1,0 +1,87 @@
+name: Reusable - CloudFormation Stack Deploy
+
+# Uses a static AWS IAM User (CLI-profile-style access key/secret) instead of OIDC
+# role assumption. The access key id is passed in as a payload input (sourced by the
+# caller from a GitHub Actions Variable); the secret key is picked up from the
+# `AWS_SECRET_ACCESS_KEY` secret via `secrets: inherit` on the caller's job.
+
+on:
+  workflow_call:
+    inputs:
+      stack-name:
+        required: true
+        type: string
+      template-path:
+        description: "Path (relative to repo root) to the CFN template, e.g. infra/cloudformation/network.yaml"
+        required: true
+        type: string
+      parameters-path:
+        description: "Path (relative to repo root) to the parameters JSON file"
+        required: true
+        type: string
+      environment:
+        description: "sit | uat | prd — used for tagging only"
+        required: true
+        type: string
+      extra-parameter-overrides:
+        description: "Optional space-separated ParameterKey=Value overrides appended after the parameter file (e.g. to inject a freshly-built ContainerImage)"
+        required: false
+        type: string
+        default: ""
+      aws-region:
+        description: "AWS region (e.g. the caller's vars.AWS_REGION value) — always passed explicitly by the caller, no hardcoded default"
+        required: true
+        type: string
+      aws-access-key-id:
+        description: "IAM user access key id (e.g. the caller's vars.AWS_ACCESS_KEY_ID value)"
+        required: true
+        type: string
+    outputs:
+      stack-id:
+        value: ${{ jobs.deploy.outputs.stack-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.stack-name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      stack-id: ${{ steps.deploy.outputs.stack-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials (access key)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ inputs.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Convert parameters JSON to CLI overrides
+        id: params
+        run: |
+          OVERRIDES=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${{ inputs.parameters-path }}" | tr '\n' ' ')
+          echo "overrides=${OVERRIDES} ${{ inputs.extra-parameter-overrides }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy stack
+        id: deploy
+        run: |
+          aws cloudformation deploy \
+            --stack-name "${{ inputs.stack-name }}" \
+            --template-file "${{ inputs.template-path }}" \
+            --parameter-overrides ${{ steps.params.outputs.overrides }} \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --tags Environment="${{ inputs.environment }}" ManagedBy=github-actions \
+            --no-fail-on-empty-changeset
+
+          STACK_ID=$(aws cloudformation describe-stacks --stack-name "${{ inputs.stack-name }}" --query "Stacks[0].StackId" --output text)
+          echo "stack-id=${STACK_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Show stack outputs
+        run: |
+          aws cloudformation describe-stacks --stack-name "${{ inputs.stack-name }}" \
+            --query "Stacks[0].Outputs" --output table

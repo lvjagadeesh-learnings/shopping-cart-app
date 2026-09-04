@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "sit" },
+  { "ParameterKey": "MaxReceiveCount", "ParameterValue": "5" }
+]

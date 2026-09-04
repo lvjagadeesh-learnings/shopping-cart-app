@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - Aurora PostgreSQL Serverless v2 cluster (single cluster,
+  schema-per-service isolation), DB subnet group, and Secrets Manager-managed
+  master credentials with automatic rotation support. Depends on network.yaml
+  exports (VPC/private subnets/database security group).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+  DatabaseName:
+    Type: String
+    Default: shoppingcart
+
+  MasterUsername:
+    Type: String
+    Default: shoppingcart_admin
+
+  MinCapacity:
+    Type: Number
+    Default: 0.5
+    Description: Aurora Serverless v2 minimum ACUs
+
+  MaxCapacity:
+    Type: Number
+    Default: 4
+    Description: Aurora Serverless v2 maximum ACUs
+
+  EngineVersion:
+    Type: String
+    Default: '16.4'
+
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+
+  DeletionProtection:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+
+Resources:
+  AuroraStorageKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub Customer managed key for ${EnvironmentName} Aurora storage encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowRdsServiceUse
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: '*'
+
+  AuroraStorageKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${EnvironmentName}-shopping-cart-aurora
+      TargetKeyId: !Ref AuroraStorageKey
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${EnvironmentName} Aurora subnet group (private subnets)
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-subnet-group
+
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}/shopping-cart/db-credentials
+      Description: !Sub Aurora PostgreSQL master credentials for ${EnvironmentName}
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username":"${MasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      EngineMode: provisioned
+      EngineVersion: !Ref EngineVersion
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      DeletionProtection: !Ref DeletionProtection
+      StorageEncrypted: true
+      KmsKeyId: !Ref AuroraStorageKey
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinCapacity
+        MaxCapacity: !Ref MaxCapacity
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-shopping-cart-aurora
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      Engine: aurora-postgresql
+      DBInstanceClass: db.serverless
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-shopping-cart-aurora-instance-1
+
+  DatabaseSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DatabaseSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+Outputs:
+  ClusterEndpoint:
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-DbClusterEndpoint
+
+  ClusterPort:
+    Value: !GetAtt AuroraCluster.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-DbClusterPort
+
+  DatabaseName:
+    Value: !Ref DatabaseName
+    Export:
+      Name: !Sub ${EnvironmentName}-DbName
+
+  DatabaseSecretArn:
+    Value: !Ref DatabaseSecret
+    Export:
+      Name: !Sub ${EnvironmentName}-DbSecretArn

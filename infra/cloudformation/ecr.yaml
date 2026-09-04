@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - one ECR repository per microservice (9 services).
+  Image scanning on push enabled; lifecycle policy keeps the last 20 images.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+Resources:
+  AuthServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-auth-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  CatalogServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-catalog-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  CartServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-cart-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  OrderServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-order-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  PaymentServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-payment-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  InventoryServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-inventory-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  NotificationServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-notification-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ReviewServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-review-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  RecommendationServiceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-recommendation-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+Outputs:
+  AuthServiceRepositoryUri:
+    Value: !GetAtt AuthServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-AuthServiceRepositoryUri
+
+  CatalogServiceRepositoryUri:
+    Value: !GetAtt CatalogServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-CatalogServiceRepositoryUri
+
+  CartServiceRepositoryUri:
+    Value: !GetAtt CartServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-CartServiceRepositoryUri
+
+  OrderServiceRepositoryUri:
+    Value: !GetAtt OrderServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-OrderServiceRepositoryUri
+
+  PaymentServiceRepositoryUri:
+    Value: !GetAtt PaymentServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-PaymentServiceRepositoryUri
+
+  InventoryServiceRepositoryUri:
+    Value: !GetAtt InventoryServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-InventoryServiceRepositoryUri
+
+  NotificationServiceRepositoryUri:
+    Value: !GetAtt NotificationServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-NotificationServiceRepositoryUri
+
+  ReviewServiceRepositoryUri:
+    Value: !GetAtt ReviewServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-ReviewServiceRepositoryUri
+
+  RecommendationServiceRepositoryUri:
+    Value: !GetAtt RecommendationServiceRepository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-RecommendationServiceRepositoryUri

@@ -1,0 +1,17 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "prd" },
+  { "ParameterKey": "ServiceName", "ParameterValue": "notification-service" },
+  { "ParameterKey": "ContainerImage", "ParameterValue": "REPLACED_AT_DEPLOY_TIME_BY_CI" },
+  { "ParameterKey": "ContainerPort", "ParameterValue": "8080" },
+  { "ParameterKey": "HealthCheckPath", "ParameterValue": "/health" },
+  { "ParameterKey": "PathPattern", "ParameterValue": "/api/notifications/*" },
+  { "ParameterKey": "ListenerRulePriority", "ParameterValue": "160" },
+  { "ParameterKey": "TaskRoleType", "ParameterValue": "Notification" },
+  { "ParameterKey": "Cpu", "ParameterValue": "512" },
+  { "ParameterKey": "Memory", "ParameterValue": "1024" },
+  { "ParameterKey": "DesiredCount", "ParameterValue": "2" },
+  { "ParameterKey": "MinCapacity", "ParameterValue": "2" },
+  { "ParameterKey": "MaxCapacity", "ParameterValue": "6" },
+  { "ParameterKey": "TargetCpuUtilization", "ParameterValue": "60" },
+  { "ParameterKey": "LogRetentionInDays", "ParameterValue": "90" }
+]

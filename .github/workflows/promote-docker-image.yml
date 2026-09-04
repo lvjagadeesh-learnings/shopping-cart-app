@@ -1,0 +1,205 @@
+name: Promote Docker Image
+
+# Stage 4 of the pipeline: CI -> Create Release Tag -> Publish Docker Image -> Promote Docker Image
+#
+# Promotes an already-published image (never rebuilt) between environments:
+#   SIT -> UAT (target-environment: uat)
+#   UAT -> PRD (target-environment: prd)
+# The manifest is copied byte-for-byte with `docker buildx imagetools create` and the
+# destination digest is re-resolved and used to deploy the target ecs-service stacks
+# (digest-pinned only — never a mutable tag).
+#
+# Cross-environment credentials: because a single job can only bind to ONE GitHub
+# Environment (and therefore only one set of environment-scoped `vars.AWS_*`), this
+# workflow also needs the following REPOSITORY-level variables/secrets (Settings >
+# Secrets and variables > Actions, not environment-scoped) so it can authenticate to
+# both the source and destination AWS accounts (IAM Users, access-key based) in the
+# same job:
+#   AWS_ACCOUNT_ID_SIT / AWS_ACCESS_KEY_ID_SIT (var)  + AWS_SECRET_ACCESS_KEY_SIT (secret)
+#   AWS_ACCOUNT_ID_UAT / AWS_ACCESS_KEY_ID_UAT (var)  + AWS_SECRET_ACCESS_KEY_UAT (secret)
+#   AWS_ACCOUNT_ID_PRD / AWS_ACCESS_KEY_ID_PRD (var)  + AWS_SECRET_ACCESS_KEY_PRD (secret)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-environment:
+        description: "Environment to promote INTO"
+        required: true
+        type: choice
+        options: [uat, prd]
+      release-tag:
+        description: "Release tag to promote, e.g. v1.4.0 (must already be published to the source environment)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-source:
+    name: Resolve source environment
+    runs-on: ubuntu-latest
+    outputs:
+      source-env: ${{ steps.resolve.outputs.source-env }}
+    steps:
+      - name: Compute source environment
+        id: resolve
+        run: |
+          case "${{ inputs.target-environment }}" in
+            uat) echo "source-env=sit" >> "$GITHUB_OUTPUT" ;;
+            prd) echo "source-env=uat" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported target-environment: ${{ inputs.target-environment }}" >&2; exit 1 ;;
+          esac
+
+  promote:
+    name: Promote (${{ matrix.service.name }})
+    needs: [resolve-source]
+    environment: ${{ inputs.target-environment }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: auth-service, repo-suffix: auth }
+          - { name: catalog-service, repo-suffix: catalog }
+          - { name: cart-service, repo-suffix: cart }
+          - { name: order-service, repo-suffix: order }
+          - { name: payment-service, repo-suffix: payment }
+          - { name: inventory-service, repo-suffix: inventory }
+          - { name: notification-service, repo-suffix: notification }
+          - { name: review-service, repo-suffix: review }
+          - { name: recommendation-service, repo-suffix: recommendation }
+    # AWS_REGION is read here (not at workflow level) so it resolves against the
+    # target environment's scoped variable, not a repo-level fallback.
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      SOURCE_ENV: ${{ needs.resolve-source.outputs.source-env }}
+      TARGET_ENV: ${{ inputs.target-environment }}
+    steps:
+      - name: Checkout (for parameter files at this tag)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release-tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve repo-scoped AWS vars for source/target
+        id: accounts
+        run: |
+          set -euo pipefail
+          declare -A ACCOUNT_ID=( [sit]="${{ vars.AWS_ACCOUNT_ID_SIT }}" [uat]="${{ vars.AWS_ACCOUNT_ID_UAT }}" [prd]="${{ vars.AWS_ACCOUNT_ID_PRD }}" )
+          declare -A ACCESS_KEY_ID=( [sit]="${{ vars.AWS_ACCESS_KEY_ID_SIT }}" [uat]="${{ vars.AWS_ACCESS_KEY_ID_UAT }}" [prd]="${{ vars.AWS_ACCESS_KEY_ID_PRD }}" )
+          echo "source-account-id=${ACCOUNT_ID[$SOURCE_ENV]}" >> "$GITHUB_OUTPUT"
+          echo "source-access-key-id=${ACCESS_KEY_ID[$SOURCE_ENV]}" >> "$GITHUB_OUTPUT"
+          echo "source-env-upper=${SOURCE_ENV^^}" >> "$GITHUB_OUTPUT"
+          echo "target-account-id=${ACCOUNT_ID[$TARGET_ENV]}" >> "$GITHUB_OUTPUT"
+          echo "target-access-key-id=${ACCESS_KEY_ID[$TARGET_ENV]}" >> "$GITHUB_OUTPUT"
+          echo "target-env-upper=${TARGET_ENV^^}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (source, access key)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ steps.accounts.outputs.source-access-key-id }}
+          aws-secret-access-key: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_{0}', steps.accounts.outputs.source-env-upper)] }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to source Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve source image digest
+        id: source
+        run: |
+          set -euo pipefail
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "${SOURCE_ENV}-${{ matrix.service.repo-suffix }}-service" \
+            --image-ids imageTag="${{ inputs.release-tag }}" \
+            --query "imageDetails[0].imageDigest" --output text)
+          REPO="${{ steps.accounts.outputs.source-account-id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${SOURCE_ENV}-${{ matrix.service.repo-suffix }}-service"
+          echo "Source digest: ${REPO}@${DIGEST}"
+          echo "image-uri=${REPO}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull source image (for vulnerability re-scan)
+        run: docker pull "${{ steps.source.outputs.image-uri }}"
+
+      - name: Trivy image vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.source.outputs.image-uri }}
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Secret leak scan (gitleaks, repo at release tag)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Configure AWS credentials (target, access key)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ steps.accounts.outputs.target-access-key-id }}
+          aws-secret-access-key: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_{0}', steps.accounts.outputs.target-env-upper)] }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to target Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Copy manifest to target ECR (no rebuild)
+        run: |
+          set -euo pipefail
+          TARGET_REPO="${{ steps.accounts.outputs.target-account-id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${TARGET_ENV}-${{ matrix.service.repo-suffix }}-service"
+          docker buildx imagetools create \
+            --tag "${TARGET_REPO}:${{ inputs.release-tag }}" \
+            "${{ steps.source.outputs.image-uri }}"
+
+      - name: Resolve destination image digest
+        id: dest
+        run: |
+          set -euo pipefail
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "${TARGET_ENV}-${{ matrix.service.repo-suffix }}-service" \
+            --image-ids imageTag="${{ inputs.release-tag }}" \
+            --query "imageDetails[0].imageDigest" --output text)
+          REPO="${{ steps.accounts.outputs.target-account-id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${TARGET_ENV}-${{ matrix.service.repo-suffix }}-service"
+          echo "Destination digest: ${REPO}@${DIGEST}"
+          echo "image-uri=${REPO}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy target ecs-service stack (digest-pinned)
+        run: |
+          set -euo pipefail
+          PARAMS_FILE="infra/cloudformation/parameters/${TARGET_ENV}/ecs-service-${{ matrix.service.repo-suffix }}.json"
+          OVERRIDES=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${PARAMS_FILE}" | tr '\n' ' ')
+
+          aws cloudformation deploy \
+            --stack-name "${TARGET_ENV}-shopping-cart-ecs-service-${{ matrix.service.repo-suffix }}" \
+            --template-file infra/cloudformation/ecs-service.yaml \
+            --parameter-overrides ${OVERRIDES} "ContainerImage=${{ steps.dest.outputs.image-uri }}" \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --tags Environment="${TARGET_ENV}" ManagedBy=github-actions ReleaseTag="${{ inputs.release-tag }}" PromotedFrom="${SOURCE_ENV}" \
+            --no-fail-on-empty-changeset
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [resolve-source, promote]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Promote Docker Image Summary"
+            echo ""
+            echo "Promoting \`${{ inputs.release-tag }}\`: \`${{ needs.resolve-source.outputs.source-env }}\` -> \`${{ inputs.target-environment }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Promote (all services) | ${{ needs.promote.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: needs.promote.result == 'failure'
+        run: |
+          echo "Promote failed for one or more services."
+          exit 1

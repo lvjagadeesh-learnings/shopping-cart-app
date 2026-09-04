@@ -24,6 +24,35 @@ Conditions:
   HasCustomDomain: !Not [!Equals [!Ref AcmCertificateArn, '']]
 
 Resources:
+  FrontendBucketKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub Customer managed key for ${EnvironmentName} frontend bucket encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowCloudFrontServiceUse
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+
+  FrontendBucketKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${EnvironmentName}-shopping-cart-frontend
+      TargetKeyId: !Ref FrontendBucketKey
+
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -36,7 +65,8 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref FrontendBucketKey
       VersioningConfiguration:
         Status: Enabled
 

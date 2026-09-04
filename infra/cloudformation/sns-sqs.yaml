@@ -20,6 +20,7 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub ${EnvironmentName}-order-events
+      KmsMasterKeyId: alias/aws/sns
 
   # --- Inventory subscriber (OrderPlaced only) ---
   InventoryOrderPlacedDlq:
@@ -27,12 +28,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-dlq
       MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
 
   InventoryOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-queue
       VisibilityTimeout: 60
+      SqsManagedSseEnabled: true
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt InventoryOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -69,12 +72,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-dlq
       MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
 
   NotificationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-queue
       VisibilityTimeout: 60
+      SqsManagedSseEnabled: true
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -111,12 +116,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-dlq
       MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
 
   NotificationOrderStatusChangedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-queue
       VisibilityTimeout: 60
+      SqsManagedSseEnabled: true
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderStatusChangedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -153,12 +160,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-dlq
       MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
 
   RecommendationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-queue
       VisibilityTimeout: 60
+      SqsManagedSseEnabled: true
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RecommendationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount

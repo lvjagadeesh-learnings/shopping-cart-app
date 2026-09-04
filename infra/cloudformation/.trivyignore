@@ -1,0 +1,27 @@
+# Trivy IaC findings accepted as by-design or platform-limited for this app.
+# Each entry documents WHY it's not fixed in code. Re-review if the underlying
+# design assumption changes (e.g. sit gets an ACM cert, WAF budget approved).
+
+# ALB is intentionally internet-facing: it's the public entry point for a
+# customer-facing shopping cart web app.
+AWS-0053
+
+# HttpListener exists unconditionally so `sit` can run without an ACM cert
+# (see alb.yaml CertificateArn parameter). When a cert is supplied, HTTP
+# redirects to HTTPS; uat/prd are expected to always supply a cert.
+AWS-0054
+
+# ConnectionStrings__DbSecretArn carries a Secrets Manager ARN, not a secret
+# value, so the ECS task can fetch/rotate it via SDK. Trivy's check flags the
+# variable NAME (contains "Secret") regardless of content sensitivity.
+AWS-0036
+
+# CloudFront's MinimumProtocolVersion cannot be set together with
+# CloudFrontDefaultCertificate (AWS restriction) - it only applies once a
+# custom domain + ACM cert is supplied, where it's already TLSv1.2_2021.
+AWS-0013
+
+# Adding a WAFv2 WebACL (CLOUDFRONT scope) requires deploying in us-east-1
+# and picking managed rule groups/rate limits - a deliberate follow-up, not
+# a drop-in fix, since it's a new billable resource.
+AWS-0011

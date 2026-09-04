@@ -98,18 +98,12 @@ jobs:
     if: |
       always() &&
       (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.changed == 'true')
-    # environment must be declared here (not just passed as an input) so that
-    # vars.AWS_REGION / vars.AWS_ACCESS_KEY_ID resolve against this job's
-    # environment-scoped Variables rather than coming back empty.
-    environment: ${{ github.event.inputs.environment || 'sit' }}
     uses: ./.github/workflows/reusable-frontend-ci.yml
     with:
       deploy: true
       bucket-name: ${{ needs.resolve-stack-outputs.outputs.bucket-name }}
       distribution-id: ${{ needs.resolve-stack-outputs.outputs.distribution-id }}
       api-base-url: http://${{ needs.resolve-stack-outputs.outputs.alb-dns-name }}
-      aws-region: ${{ vars.AWS_REGION }}
-      aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
       environment: ${{ github.event.inputs.environment || 'sit' }}
     secrets: inherit
 

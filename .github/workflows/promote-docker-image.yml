@@ -123,7 +123,7 @@ jobs:
         run: docker pull "${{ steps.source.outputs.image-uri }}"
 
       - name: Trivy image vulnerability scan
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: ${{ steps.source.outputs.image-uri }}

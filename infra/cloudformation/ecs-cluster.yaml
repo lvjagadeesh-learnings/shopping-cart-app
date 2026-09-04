@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - ECS Cluster with Fargate + Fargate Spot capacity
+  providers and Container Insights enabled.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+Resources:
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-shopping-cart-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+          Base: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 4
+
+  EcsServiceNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: !Sub ${EnvironmentName}.shopping-cart.local
+      Vpc:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+
+Outputs:
+  ClusterName:
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub ${EnvironmentName}-EcsClusterName
+
+  ClusterArn:
+    Value: !GetAtt EcsCluster.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-EcsClusterArn
+
+  ServiceDiscoveryNamespaceId:
+    Value: !Ref EcsServiceNamespace
+    Export:
+      Name: !Sub ${EnvironmentName}-ServiceDiscoveryNamespaceId

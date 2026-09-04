@@ -1,0 +1,46 @@
+name: Security Scan
+
+# Repo-wide security gate: dependency/filesystem vulnerability scan, IaC (CloudFormation)
+# config scan, and secret-leak scan. Runs on every PR and every push to main,
+# independent of the backend/frontend change-detection in ci-backend.yml /
+# ci-frontend.yml, since these checks are cheap and cover the whole repo (including
+# infra/ and root-level files that neither backend/** nor frontend/** would match).
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  vulnerability-scan:
+    name: Vulnerability Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan (dependencies)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Trivy IaC config scan (CloudFormation)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra/cloudformation
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+      - name: Secret leak scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

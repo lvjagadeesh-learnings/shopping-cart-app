@@ -1,0 +1,17 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "sit" },
+  { "ParameterKey": "ServiceName", "ParameterValue": "payment-service" },
+  { "ParameterKey": "ContainerImage", "ParameterValue": "REPLACED_AT_DEPLOY_TIME_BY_CI" },
+  { "ParameterKey": "ContainerPort", "ParameterValue": "8080" },
+  { "ParameterKey": "HealthCheckPath", "ParameterValue": "/health" },
+  { "ParameterKey": "PathPattern", "ParameterValue": "/api/payments/*" },
+  { "ParameterKey": "ListenerRulePriority", "ParameterValue": "140" },
+  { "ParameterKey": "TaskRoleType", "ParameterValue": "Default" },
+  { "ParameterKey": "Cpu", "ParameterValue": "256" },
+  { "ParameterKey": "Memory", "ParameterValue": "512" },
+  { "ParameterKey": "DesiredCount", "ParameterValue": "1" },
+  { "ParameterKey": "MinCapacity", "ParameterValue": "1" },
+  { "ParameterKey": "MaxCapacity", "ParameterValue": "2" },
+  { "ParameterKey": "TargetCpuUtilization", "ParameterValue": "60" },
+  { "ParameterKey": "LogRetentionInDays", "ParameterValue": "14" }
+]

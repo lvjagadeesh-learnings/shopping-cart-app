@@ -1,0 +1,10 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "uat" },
+  { "ParameterKey": "DatabaseName", "ParameterValue": "shoppingcart" },
+  { "ParameterKey": "MasterUsername", "ParameterValue": "shoppingcart_admin" },
+  { "ParameterKey": "MinCapacity", "ParameterValue": "0.5" },
+  { "ParameterKey": "MaxCapacity", "ParameterValue": "4" },
+  { "ParameterKey": "EngineVersion", "ParameterValue": "16.4" },
+  { "ParameterKey": "BackupRetentionPeriod", "ParameterValue": "7" },
+  { "ParameterKey": "DeletionProtection", "ParameterValue": "false" }
+]

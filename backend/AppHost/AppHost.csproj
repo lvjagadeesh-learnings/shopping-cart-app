@@ -1,0 +1,28 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.3">
+
+  <ItemGroup>
+    <ProjectReference Include="..\services\auth-service\AuthService.Api\AuthService.Api.csproj" />
+    <ProjectReference Include="..\services\cart-service\CartService.Api\CartService.Api.csproj" />
+    <ProjectReference Include="..\services\catalog-service\CatalogService.Api\CatalogService.Api.csproj" />
+    <ProjectReference Include="..\services\inventory-service\InventoryService.Api\InventoryService.Api.csproj" />
+    <ProjectReference Include="..\services\notification-service\NotificationService.Api\NotificationService.Api.csproj" />
+    <ProjectReference Include="..\services\order-service\OrderService.Api\OrderService.Api.csproj" />
+    <ProjectReference Include="..\services\payment-service\PaymentService.Api\PaymentService.Api.csproj" />
+    <ProjectReference Include="..\services\recommendation-service\RecommendationService.Api\RecommendationService.Api.csproj" />
+    <ProjectReference Include="..\services\review-service\ReviewService.Api\ReviewService.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.5.3" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <UserSecretsId>1f85c974-98b5-4190-afc3-fd8c8b78ac91</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

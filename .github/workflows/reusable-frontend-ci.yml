@@ -1,0 +1,90 @@
+name: Reusable - Frontend CI
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        description: "If true, sync build output to S3 and invalidate CloudFront (requires bucket-name/distribution-id/aws-access-key-id)"
+        required: false
+        type: boolean
+        default: false
+      bucket-name:
+        required: false
+        type: string
+        default: ""
+      distribution-id:
+        required: false
+        type: string
+        default: ""
+      api-base-url:
+        description: "Public ALB/API base URL baked into the frontend build via VITE_API_BASE_URL"
+        required: false
+        type: string
+        default: ""
+      aws-region:
+        description: "AWS region, e.g. ${{ vars.AWS_REGION }} (required if deploy is true)"
+        required: false
+        type: string
+        default: ""
+      aws-access-key-id:
+        description: "IAM user access key id, e.g. ${{ vars.AWS_ACCESS_KEY_ID }} (required if deploy is true)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, Lint & Test (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test -- --run
+
+      - name: Build
+        env:
+          VITE_API_BASE_URL: ${{ inputs.api-base-url }}
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Configure AWS credentials (access key)
+        if: inputs.deploy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ inputs.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Sync to S3
+        if: inputs.deploy
+        run: aws s3 sync dist "s3://${{ inputs.bucket-name }}" --delete
+
+      - name: Invalidate CloudFront
+        if: inputs.deploy
+        run: aws cloudfront create-invalidation --distribution-id "${{ inputs.distribution-id }}" --paths "/*"

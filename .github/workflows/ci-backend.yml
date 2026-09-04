@@ -1,0 +1,174 @@
+name: CI - Backend
+
+# Stage 1 (backend) of the pipeline: CI -> Create Release Tag -> Publish Docker Image -> Promote Docker Image
+#
+# Runs on every PR (merge gate, no release) and on every push to main (merge gate +
+# chains into the reusable release-tag workflow to cut a new version when the
+# Conventional Commits since the last tag warrant one).
+#
+# The workflow always triggers (so required PR status checks resolve instead of
+# staying pending), but the detect-changes job skips the actual build/test/scan jobs
+# when the push/PR touches no backend/** files.
+#
+# create-release-tag also runs from ci-frontend.yml on push to main (release tagging
+# is repo-wide, not backend/frontend scoped). Both share the `release-tagging`
+# concurrency group so only one actually creates the tag; the other sees the tag
+# already exists (via reusable-release-tag.yml's own "no commits since last tag"
+# check) and no-ops.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+  security-events: write
+  actions: read
+
+jobs:
+  detect-changes:
+    name: Detect backend changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci-backend.yml'
+              - '.github/workflows/reusable-dotnet-ci.yml'
+
+  build-unit-test-backend:
+    name: Build & Unit Test (${{ matrix.service.name }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: auth-service, project: services/auth-service/AuthService.Api/AuthService.Api.csproj, tests: services/auth-service/AuthService.Tests/AuthService.Tests.csproj, dockerfile: services/auth-service/Dockerfile }
+          - { name: catalog-service, project: services/catalog-service/CatalogService.Api/CatalogService.Api.csproj, tests: services/catalog-service/CatalogService.Tests/CatalogService.Tests.csproj, dockerfile: services/catalog-service/Dockerfile }
+          - { name: cart-service, project: services/cart-service/CartService.Api/CartService.Api.csproj, tests: services/cart-service/CartService.Tests/CartService.Tests.csproj, dockerfile: services/cart-service/Dockerfile }
+          - { name: order-service, project: services/order-service/OrderService.Api/OrderService.Api.csproj, tests: services/order-service/OrderService.Tests/OrderService.Tests.csproj, dockerfile: services/order-service/Dockerfile }
+          - { name: payment-service, project: services/payment-service/PaymentService.Api/PaymentService.Api.csproj, tests: services/payment-service/PaymentService.Tests/PaymentService.Tests.csproj, dockerfile: services/payment-service/Dockerfile }
+          - { name: inventory-service, project: services/inventory-service/InventoryService.Api/InventoryService.Api.csproj, tests: services/inventory-service/InventoryService.Tests/InventoryService.Tests.csproj, dockerfile: services/inventory-service/Dockerfile }
+          - { name: notification-service, project: services/notification-service/NotificationService.Api/NotificationService.Api.csproj, tests: services/notification-service/NotificationService.Tests/NotificationService.Tests.csproj, dockerfile: services/notification-service/Dockerfile }
+          - { name: review-service, project: services/review-service/ReviewService.Api/ReviewService.Api.csproj, tests: services/review-service/ReviewService.Tests/ReviewService.Tests.csproj, dockerfile: services/review-service/Dockerfile }
+          - { name: recommendation-service, project: services/recommendation-service/RecommendationService.Api/RecommendationService.Api.csproj, tests: services/recommendation-service/RecommendationService.Tests/RecommendationService.Tests.csproj, dockerfile: services/recommendation-service/Dockerfile }
+    uses: ./.github/workflows/reusable-dotnet-ci.yml
+    with:
+      service-name: ${{ matrix.service.name }}
+      project-path: ${{ matrix.service.project }}
+      test-project-path: ${{ matrix.service.tests }}
+      dockerfile-path: ${{ matrix.service.dockerfile }}
+      # image-repository intentionally omitted: CI is test-only, no image build/push
+
+  integration-test:
+    name: Integration Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run integration test suites (Category=Integration)
+        run: |
+          set -euo pipefail
+          FOUND=0
+          for testcsproj in $(find . -name '*.Tests.csproj'); do
+            if grep -rl 'Category.*Integration' "$(dirname "$testcsproj")" >/dev/null 2>&1; then
+              FOUND=1
+              echo "::group::Integration tests - ${testcsproj}"
+              dotnet test "$testcsproj" --configuration Release --filter "Category=Integration" --logger "trx;LogFileName=integration-results.trx"
+              echo "::endgroup::"
+            fi
+          done
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No test project currently defines an Integration-category test; stage is a no-op placeholder until one is added." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  code-scanning-backend:
+    name: Code Scanning (CodeQL - C#)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:csharp"
+
+  summary:
+    name: Summary
+    if: always()
+    needs:
+      [
+        detect-changes,
+        build-unit-test-backend,
+        integration-test,
+        code-scanning-backend,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "### Backend CI Summary"
+            echo ""
+            echo "Backend changed: \`${{ needs.detect-changes.outputs.backend }}\`"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Build & Unit Test | ${{ needs.build-unit-test-backend.result }} |"
+            echo "| Integration Tests | ${{ needs.integration-test.result }} |"
+            echo "| Code Scanning | ${{ needs.code-scanning-backend.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail summary if any required stage failed
+        if: |
+          needs.build-unit-test-backend.result == 'failure' ||
+          needs.integration-test.result == 'failure' ||
+          needs.code-scanning-backend.result == 'failure'
+        run: |
+          echo "One or more backend CI stages failed."
+          exit 1
+
+  create-release-tag:
+    name: Create Release Tag
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [summary]
+    concurrency:
+      group: release-tagging
+      cancel-in-progress: false
+    uses: ./.github/workflows/reusable-release-tag.yml
+    permissions:
+      contents: write

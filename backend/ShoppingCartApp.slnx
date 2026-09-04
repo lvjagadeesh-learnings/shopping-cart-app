@@ -1,0 +1,44 @@
+<Solution>
+  <Folder Name="/services/" />
+  <Folder Name="/services/auth-service/">
+    <Project Path="services/auth-service/AuthService.Api/AuthService.Api.csproj" />
+    <Project Path="services/auth-service/AuthService.Tests/AuthService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/cart-service/">
+    <Project Path="services/cart-service/CartService.Api/CartService.Api.csproj" />
+    <Project Path="services/cart-service/CartService.Tests/CartService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/catalog-service/">
+    <Project Path="services/catalog-service/CatalogService.Api/CatalogService.Api.csproj" />
+    <Project Path="services/catalog-service/CatalogService.Tests/CatalogService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/inventory-service/">
+    <Project Path="services/inventory-service/InventoryService.Api/InventoryService.Api.csproj" />
+    <Project Path="services/inventory-service/InventoryService.Tests/InventoryService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/notification-service/">
+    <Project Path="services/notification-service/NotificationService.Api/NotificationService.Api.csproj" />
+    <Project Path="services/notification-service/NotificationService.Tests/NotificationService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/order-service/">
+    <Project Path="services/order-service/OrderService.Api/OrderService.Api.csproj" />
+    <Project Path="services/order-service/OrderService.Tests/OrderService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/payment-service/">
+    <Project Path="services/payment-service/PaymentService.Api/PaymentService.Api.csproj" />
+    <Project Path="services/payment-service/PaymentService.Tests/PaymentService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/recommendation-service/">
+    <Project Path="services/recommendation-service/RecommendationService.Api/RecommendationService.Api.csproj" />
+    <Project Path="services/recommendation-service/RecommendationService.Tests/RecommendationService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/services/review-service/">
+    <Project Path="services/review-service/ReviewService.Api/ReviewService.Api.csproj" />
+    <Project Path="services/review-service/ReviewService.Tests/ReviewService.Tests.csproj" />
+  </Folder>
+  <Folder Name="/shared/">
+    <Project Path="shared/BuildingBlocks/BuildingBlocks.csproj" />
+  </Folder>
+  <Project Path="AppHost/AppHost.csproj" />
+  <Project Path="ServiceDefaults/ServiceDefaults.csproj" />
+</Solution>

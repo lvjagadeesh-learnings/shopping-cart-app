@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "uat" },
+  { "ParameterKey": "MaxReceiveCount", "ParameterValue": "5" }
+]

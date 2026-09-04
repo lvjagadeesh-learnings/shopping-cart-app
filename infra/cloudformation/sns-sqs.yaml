@@ -1,0 +1,216 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - OrderEvents SNS topic fanning out to per-subscriber SQS
+  queues (Inventory, Notification x2, Recommendation), each with its own
+  dead-letter queue. Queue names follow the convention referenced by
+  iam.yaml's scoped IAM policies.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+    Description: Number of failed deliveries before a message moves to its DLQ.
+
+Resources:
+  OrderEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${EnvironmentName}-order-events
+
+  # --- Inventory subscriber (OrderPlaced only) ---
+  InventoryOrderPlacedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-inventory-order-placed-dlq
+      MessageRetentionPeriod: 1209600
+
+  InventoryOrderPlacedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-inventory-order-placed-queue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt InventoryOrderPlacedDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  InventoryOrderPlacedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref InventoryOrderPlacedQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt InventoryOrderPlacedQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  InventoryOrderPlacedSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt InventoryOrderPlacedQueue.Arn
+      FilterPolicy:
+        eventType: [OrderPlaced]
+
+  # --- Notification subscriber (OrderPlaced) ---
+  NotificationOrderPlacedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-notification-order-placed-dlq
+      MessageRetentionPeriod: 1209600
+
+  NotificationOrderPlacedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-notification-order-placed-queue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationOrderPlacedDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  NotificationOrderPlacedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationOrderPlacedQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt NotificationOrderPlacedQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  NotificationOrderPlacedSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt NotificationOrderPlacedQueue.Arn
+      FilterPolicy:
+        eventType: [OrderPlaced]
+
+  # --- Notification subscriber (OrderStatusChanged) ---
+  NotificationOrderStatusChangedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-dlq
+      MessageRetentionPeriod: 1209600
+
+  NotificationOrderStatusChangedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-queue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationOrderStatusChangedDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  NotificationOrderStatusChangedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationOrderStatusChangedQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt NotificationOrderStatusChangedQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  NotificationOrderStatusChangedSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt NotificationOrderStatusChangedQueue.Arn
+      FilterPolicy:
+        eventType: [OrderStatusChanged]
+
+  # --- Recommendation subscriber (OrderPlaced only) ---
+  RecommendationOrderPlacedDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-dlq
+      MessageRetentionPeriod: 1209600
+
+  RecommendationOrderPlacedQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-queue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RecommendationOrderPlacedDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  RecommendationOrderPlacedQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref RecommendationOrderPlacedQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt RecommendationOrderPlacedQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  RecommendationOrderPlacedSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt RecommendationOrderPlacedQueue.Arn
+      FilterPolicy:
+        eventType: [OrderPlaced]
+
+Outputs:
+  OrderEventsTopicArn:
+    Value: !Ref OrderEventsTopic
+    Export:
+      Name: !Sub ${EnvironmentName}-OrderEventsTopicArn
+
+  InventoryOrderPlacedQueueUrl:
+    Value: !Ref InventoryOrderPlacedQueue
+    Export:
+      Name: !Sub ${EnvironmentName}-InventoryOrderPlacedQueueUrl
+
+  NotificationOrderPlacedQueueUrl:
+    Value: !Ref NotificationOrderPlacedQueue
+    Export:
+      Name: !Sub ${EnvironmentName}-NotificationOrderPlacedQueueUrl
+
+  NotificationOrderStatusChangedQueueUrl:
+    Value: !Ref NotificationOrderStatusChangedQueue
+    Export:
+      Name: !Sub ${EnvironmentName}-NotificationOrderStatusChangedQueueUrl
+
+  RecommendationOrderPlacedQueueUrl:
+    Value: !Ref RecommendationOrderPlacedQueue
+    Export:
+      Name: !Sub ${EnvironmentName}-RecommendationOrderPlacedQueueUrl

@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "EnvironmentName", "ParameterValue": "uat" },
+  { "ParameterKey": "AcmCertificateArn", "ParameterValue": "" },
+  { "ParameterKey": "DomainAliases", "ParameterValue": "" }
+]

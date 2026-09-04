@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shopping Cart App - Reusable ECS Fargate service template. Deployed once
+  per microservice per environment (parameterized). Creates a Task
+  Definition, ECS Service, Target Group, ALB Listener Rule (path-based
+  routing off the shared ALB listener), and Application Auto Scaling
+  (target tracking on CPU utilization).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [sit, uat, prd]
+
+  ServiceName:
+    Type: String
+    Description: Short service name, e.g. auth-service, catalog-service.
+
+  ContainerImage:
+    Type: String
+    Description: >
+      Full ECR image URI pinned by immutable digest only, e.g.
+      <account>.dkr.ecr.<region>.amazonaws.com/<env>-<service>-service@sha256:<digest>.
+      Mutable tags (":latest", ":<release-tag>") must never be used here — the
+      Publish/Promote Docker Image workflows always resolve and pass the digest
+      so ECS Fargate pulls the exact, immutable image content every time.
+
+  ContainerPort:
+    Type: Number
+    Default: 8080
+
+  HealthCheckPath:
+    Type: String
+    Default: /health
+
+  PathPattern:
+    Type: String
+    Description: ALB listener rule path pattern, e.g. /api/auth/*
+
+  ListenerRulePriority:
+    Type: Number
+    Description: Unique priority across all services sharing the listener.
+
+  TaskRoleType:
+    Type: String
+    Default: Default
+    AllowedValues: [Default, Order, Inventory, Notification, Recommendation]
+    Description: >
+      Selects which task role (exported by iam.yaml) to attach. Default is
+      used by services with no special AWS permissions (Auth, Catalog,
+      Cart, Payment, Review).
+
+  Cpu:
+    Type: String
+    Default: '256'
+    AllowedValues: ['256', '512', '1024', '2048']
+
+  Memory:
+    Type: String
+    Default: '512'
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+
+  MaxCapacity:
+    Type: Number
+    Default: 4
+
+  TargetCpuUtilization:
+    Type: Number
+    Default: 60
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 14
+
+Conditions:
+  IsOrderRole: !Equals [!Ref TaskRoleType, Order]
+  IsInventoryRole: !Equals [!Ref TaskRoleType, Inventory]
+  IsNotificationRole: !Equals [!Ref TaskRoleType, Notification]
+  IsRecommendationRole: !Equals [!Ref TaskRoleType, Recommendation]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}/${ServiceName}
+      RetentionInDays: !Ref LogRetentionInDays
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-${ServiceName}
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub ${EnvironmentName}-EcsTaskExecutionRoleArn
+      TaskRoleArn: !If
+        - IsOrderRole
+        - Fn::ImportValue: !Sub ${EnvironmentName}-OrderServiceTaskRoleArn
+        - !If
+          - IsInventoryRole
+          - Fn::ImportValue: !Sub ${EnvironmentName}-InventoryServiceTaskRoleArn
+          - !If
+            - IsNotificationRole
+            - Fn::ImportValue: !Sub ${EnvironmentName}-NotificationServiceTaskRoleArn
+            - !If
+              - IsRecommendationRole
+              - Fn::ImportValue: !Sub ${EnvironmentName}-RecommendationServiceTaskRoleArn
+              - Fn::ImportValue: !Sub ${EnvironmentName}-EcsDefaultTaskRoleArn
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Environment:
+            - Name: ASPNETCORE_ENVIRONMENT
+              Value: !Ref EnvironmentName
+            - Name: ConnectionStrings__DbHost
+              Value:
+                Fn::ImportValue: !Sub ${EnvironmentName}-DbClusterEndpoint
+            - Name: ConnectionStrings__DbName
+              Value:
+                Fn::ImportValue: !Sub ${EnvironmentName}-DbName
+            - Name: ConnectionStrings__DbSecretArn
+              Value:
+                Fn::ImportValue: !Sub ${EnvironmentName}-DbSecretArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref ServiceName
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-${ServiceName}-tg
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Fn::ImportValue: !Sub ${EnvironmentName}-AlbHttpListenerArn
+      Priority: !Ref ListenerRulePriority
+      Conditions:
+        - Field: path-pattern
+          Values: [!Ref PathPattern]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: ListenerRule
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-${ServiceName}
+      Cluster:
+        Fn::ImportValue: !Sub ${EnvironmentName}-EcsClusterArn
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+            - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+          SecurityGroups:
+            - Fn::ImportValue: !Sub ${EnvironmentName}-EcsServiceSecurityGroupId
+      LoadBalancers:
+        - ContainerName: !Ref ServiceName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub
+        - service/${ClusterName}/${EnvironmentName}-${ServiceName}
+        - ClusterName:
+            Fn::ImportValue: !Sub ${EnvironmentName}-EcsClusterName
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-${ServiceName}-cpu-target-tracking
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref TargetCpuUtilization
+        ScaleInCooldown: 120
+        ScaleOutCooldown: 60
+
+Outputs:
+  ServiceName:
+    Value: !Ref EcsService
+
+  TargetGroupArn:
+    Value: !Ref TargetGroup

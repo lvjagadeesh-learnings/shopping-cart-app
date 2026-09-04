@@ -75,6 +75,13 @@ jobs:
           STACK_ID=$(aws cloudformation describe-stacks --stack-name "${{ inputs.stack-name }}" --query "Stacks[0].StackId" --output text)
           echo "stack-id=${STACK_ID}" >> "$GITHUB_OUTPUT"
 
+      - name: Show failure reason
+        if: failure() && steps.deploy.outcome == 'failure'
+        run: |
+          aws cloudformation describe-stack-events --stack-name "${{ inputs.stack-name }}" \
+            --query "StackEvents[?contains(ResourceStatus, 'FAILED')].[LogicalResourceId,ResourceStatusReason]" \
+            --output table
+
       - name: Show stack outputs
         run: |
           aws cloudformation describe-stacks --stack-name "${{ inputs.stack-name }}" \

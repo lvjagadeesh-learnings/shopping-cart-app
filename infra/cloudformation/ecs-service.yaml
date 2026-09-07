@@ -96,13 +96,18 @@ Resources:
     # retained orphan from a prior attempt could collide with the new one
     # (and CFN's collision-recovery also needs logs:DeleteLogGroup, which
     # fails the same way). The StackId GUID changes on every fresh create.
+    # No RetentionInDays: the sandbox IAM user also lacks logs:PutRetentionPolicy;
+    # setting it makes CFN's create handler fail after CreateLogGroup succeeds,
+    # then attempt a self-cleanup DeleteLogGroup (also denied), surfacing a
+    # misleading DeleteLogGroup error instead of the real PutRetentionPolicy one.
+    # LogRetentionInDays parameter is kept (unused here) so existing parameter
+    # override files don't fail with an unknown-parameter error.
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub
         - ${EnvironmentName}-${ServiceName}-${UniqueId}
         - UniqueId: !Select [2, !Split ["/", !Ref "AWS::StackId"]]
-      RetentionInDays: !Ref LogRetentionInDays
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition

@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: ""
+      include-master-password:
+        description: "If true, appends MasterUserPassword=<MASTER_USER_PASSWORD secret> to the overrides. Resolved here (not by the caller) because this job's environment: binding is what scopes the secret — a caller job cannot combine environment: with uses:."
+        required: false
+        type: boolean
+        default: false
     outputs:
       stack-id:
         value: ${{ jobs.deploy.outputs.stack-id }}
@@ -57,9 +62,11 @@ jobs:
 
       - name: Convert parameters JSON to CLI overrides
         id: params
+        env:
+          MASTER_USER_PASSWORD_OVERRIDE: ${{ inputs.include-master-password && format('MasterUserPassword={0}', secrets.MASTER_USER_PASSWORD) || '' }}
         run: |
           OVERRIDES=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${{ inputs.parameters-path }}" | tr '\n' ' ')
-          echo "overrides=${OVERRIDES} ${{ inputs.extra-parameter-overrides }}" >> "$GITHUB_OUTPUT"
+          echo "overrides=${OVERRIDES} ${{ inputs.extra-parameter-overrides }} ${MASTER_USER_PASSWORD_OVERRIDE}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy stack
         id: deploy

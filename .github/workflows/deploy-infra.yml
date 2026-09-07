@@ -27,12 +27,17 @@ jobs:
   database:
     name: database
     needs: [network]
+    # environment set here (not just in the called reusable workflow) so that
+    # secrets.MASTER_USER_PASSWORD below resolves against the sit/uat/prd
+    # environment's scoped secret.
+    environment: ${{ github.event.inputs.environment }}
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-database
       template-path: infra/cloudformation/database.yaml
       parameters-path: infra/cloudformation/parameters/${{ github.event.inputs.environment }}/database.json
       environment: ${{ github.event.inputs.environment }}
+      extra-parameter-overrides: "MasterUserPassword=${{ secrets.MASTER_USER_PASSWORD }}"
     secrets: inherit
 
   ecr:

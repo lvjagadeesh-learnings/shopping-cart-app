@@ -68,6 +68,18 @@ jobs:
           OVERRIDES=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${{ inputs.parameters-path }}" | tr '\n' ' ')
           echo "overrides=${OVERRIDES} ${{ inputs.extra-parameter-overrides }} ${MASTER_USER_PASSWORD_OVERRIDE}" >> "$GITHUB_OUTPUT"
 
+      - name: Delete stack if stuck in ROLLBACK_COMPLETE
+        # A stack in ROLLBACK_COMPLETE already had its resources rolled back and
+        # cannot be updated — CloudFormation requires deleting it first.
+        run: |
+          STATUS=$(aws cloudformation describe-stacks --stack-name "${{ inputs.stack-name }}" \
+            --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          if [ "$STATUS" = "ROLLBACK_COMPLETE" ]; then
+            echo "Stack is in ROLLBACK_COMPLETE — deleting before redeploying"
+            aws cloudformation delete-stack --stack-name "${{ inputs.stack-name }}"
+            aws cloudformation wait stack-delete-complete --stack-name "${{ inputs.stack-name }}"
+          fi
+
       - name: Deploy stack
         id: deploy
         run: |

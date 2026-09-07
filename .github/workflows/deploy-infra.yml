@@ -26,7 +26,10 @@ jobs:
 
   database:
     name: database
-    needs: [network]
+    # database.yaml imports EcsClusterArn (from ecs-cluster) and
+    # EcsTaskExecutionRoleArn (from iam), in addition to network's VPC/subnet
+    # exports — without these, the stack rolls back with "No export named ...".
+    needs: [network, ecs-cluster, iam]
     # A caller job cannot combine `environment:` with `uses:` (schema conflict),
     # so the MASTER_USER_PASSWORD environment secret is resolved inside the
     # reusable workflow's own job instead, via include-master-password: true —

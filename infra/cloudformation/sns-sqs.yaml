@@ -16,47 +16,14 @@ Parameters:
     Description: Number of failed deliveries before a message moves to its DLQ.
 
 Resources:
-  MessagingKmsKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub Customer managed key for ${EnvironmentName} SNS/SQS message encryption
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EnableRootAccountPermissions
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: '*'
-          - Sid: AllowSnsServiceUse
-            Effect: Allow
-            Principal:
-              Service: sns.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey*
-            Resource: '*'
-          - Sid: AllowSqsServiceUse
-            Effect: Allow
-            Principal:
-              Service: sqs.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey*
-            Resource: '*'
-
-  MessagingKmsKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub alias/${EnvironmentName}-shopping-cart-messaging
-      TargetKeyId: !Ref MessagingKmsKey
-
+  # Encryption uses AWS-managed keys (alias/aws/sns, alias/aws/sqs), not a
+  # customer-managed CMK: the sandbox account caps customer-managed KMS keys
+  # at 2 total, and one CMK per environment (sit/uat/prd) would exceed that.
   OrderEventsTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub ${EnvironmentName}-order-events
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sns
 
   # --- Inventory subscriber (OrderPlaced only) ---
   InventoryOrderPlacedDlq:
@@ -64,14 +31,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
 
   InventoryOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-inventory-order-placed-queue
       VisibilityTimeout: 60
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt InventoryOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -108,14 +75,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
 
   NotificationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-placed-queue
       VisibilityTimeout: 60
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -152,14 +119,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-dlq
       MessageRetentionPeriod: 1209600
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
 
   NotificationOrderStatusChangedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-notification-order-status-changed-queue
       VisibilityTimeout: 60
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt NotificationOrderStatusChangedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount
@@ -196,14 +163,14 @@ Resources:
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-dlq
       MessageRetentionPeriod: 1209600
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
 
   RecommendationOrderPlacedQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub ${EnvironmentName}-recommendation-order-placed-queue
       VisibilityTimeout: 60
-      KmsMasterKeyId: !Ref MessagingKmsKey
+      KmsMasterKeyId: alias/aws/sqs
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RecommendationOrderPlacedDlq.Arn
         maxReceiveCount: !Ref MaxReceiveCount

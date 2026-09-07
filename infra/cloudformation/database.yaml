@@ -1,9 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Shopping Cart App - Aurora PostgreSQL Serverless v2 cluster (single cluster,
-  schema-per-service isolation), DB subnet group, and Secrets Manager-managed
-  master credentials with automatic rotation support. Depends on network.yaml
-  exports (VPC/private subnets/database security group).
+  Shopping Cart App - PostgreSQL data layer (schema-per-service isolation).
+  Runs as a single-instance ECS Fargate task (image: postgres:16-alpine) with
+  its data directory on an EFS file system, fronted by an internal Network
+  Load Balancer so the endpoint is stable across task restarts/redeploys.
+  This replaces Aurora/RDS: the sandbox account's SCP denies
+  rds:CreateDBInstance unconditionally for every engine/instance class, with
+  no CloudFormation-level workaround (confirmed via
+  `aws rds describe-db-engine-versions`). Every resource here uses only
+  EC2/ECS/EFS/ELBv2 actions, none of which are denied. Depends on
+  network.yaml exports (VPC/private subnets/database security group),
+  ecs-cluster.yaml (cluster) and iam.yaml (task execution role).
 
 Parameters:
   EnvironmentName:
@@ -18,136 +25,212 @@ Parameters:
     Type: String
     Default: shoppingcart_admin
 
-  MinCapacity:
-    Type: Number
-    Default: 0.5
-    Description: Aurora Serverless v2 minimum ACUs
-
-  MaxCapacity:
-    Type: Number
-    Default: 4
-    Description: Aurora Serverless v2 maximum ACUs
-
-  EngineVersion:
-    Type: String
-    Default: '16.9'
-    Description: Aurora PostgreSQL engine version (16.4 was retired by AWS; use `aws rds describe-db-engine-versions --engine aurora-postgresql` to check current availability).
-
-  BackupRetentionPeriod:
-    Type: Number
-    Default: 7
-
-  DeletionProtection:
-    Type: String
-    AllowedValues: ['true', 'false']
-    Default: 'false'
-
   MasterUserPassword:
     Type: String
     NoEcho: true
     MinLength: 8
-    Description: Aurora master user password (supplied via secret, not generated - sandbox SCP denies secretsmanager:GetRandomPassword).
+    Description: PostgreSQL master password (supplied via secret, not generated - sandbox SCP denies secretsmanager:GetRandomPassword).
+
+  PostgresImage:
+    Type: String
+    Default: postgres:16-alpine
 
 Resources:
-  AuroraStorageKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub Customer managed key for ${EnvironmentName} Aurora storage encryption
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EnableRootAccountPermissions
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: '*'
-          - Sid: AllowRdsServiceUse
-            Effect: Allow
-            Principal:
-              Service: rds.amazonaws.com
-            Action:
-              - kms:Encrypt
-              - kms:Decrypt
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:DescribeKey
-              - kms:CreateGrant
-            Resource: '*'
-
-  AuroraStorageKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub alias/${EnvironmentName}-shopping-cart-aurora
-      TargetKeyId: !Ref AuroraStorageKey
-
-  DbSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: !Sub ${EnvironmentName} Aurora subnet group (private subnets)
-      SubnetIds:
-        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
-        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-db-subnet-group
-
   DatabaseSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub ${EnvironmentName}/shopping-cart/db-credentials
-      Description: !Sub Aurora PostgreSQL master credentials for ${EnvironmentName}
+      Description: !Sub PostgreSQL master credentials for ${EnvironmentName}
       SecretString: !Sub '{"username":"${MasterUsername}","password":"${MasterUserPassword}"}'
 
-  AuroraCluster:
-    Type: AWS::RDS::DBCluster
+  PostgresLogGroup:
+    Type: AWS::Logs::LogGroup
+    # Retain on delete/rollback: the sandbox IAM user lacks logs:DeleteLogGroup,
+    # so CloudFormation-driven deletes of this resource always fail and leave
+    # the stack stuck in ROLLBACK_FAILED/DELETE_FAILED. Retaining avoids that;
+    # the log group is cheap to leave orphaned if the stack is ever deleted.
+    # No explicit LogGroupName: CFN auto-generates a unique name each create,
+    # so a retained/orphaned log group from a prior failed deploy never
+    # collides with the new one (name collision would fail early validation).
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      Engine: aurora-postgresql
-      EngineMode: provisioned
-      EngineVersion: !Ref EngineVersion
-      DatabaseName: !Ref DatabaseName
-      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
-      DBSubnetGroupName: !Ref DbSubnetGroup
-      VpcSecurityGroupIds:
-        - Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
-      BackupRetentionPeriod: !Ref BackupRetentionPeriod
-      DeletionProtection: !Ref DeletionProtection
-      StorageEncrypted: true
-      KmsKeyId: !Ref AuroraStorageKey
-      ServerlessV2ScalingConfiguration:
-        MinCapacity: !Ref MinCapacity
-        MaxCapacity: !Ref MaxCapacity
+      RetentionInDays: 14
+
+  PostgresFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-shopping-cart-postgres-data
+
+  PostgresEfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${EnvironmentName} EFS security group - allows inbound NFS only from the postgres task
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-shopping-cart-aurora
+          Value: !Sub ${EnvironmentName}-postgres-efs-sg
 
-  AuroraInstance:
-    Type: AWS::RDS::DBInstance
+  PostgresMountTarget1:
+    Type: AWS::EFS::MountTarget
     Properties:
-      DBClusterIdentifier: !Ref AuroraCluster
-      Engine: aurora-postgresql
-      DBInstanceClass: db.serverless
-      PubliclyAccessible: false
+      FileSystemId: !Ref PostgresFileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+      SecurityGroups:
+        - !Ref PostgresEfsSecurityGroup
+
+  PostgresMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref PostgresFileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+      SecurityGroups:
+        - !Ref PostgresEfsSecurityGroup
+
+  PostgresAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref PostgresFileSystem
+      PosixUser:
+        Uid: '999'
+        Gid: '999'
+      RootDirectory:
+        Path: /postgres-data
+        CreationInfo:
+          OwnerUid: '999'
+          OwnerGid: '999'
+          Permissions: '0755'
+
+  PostgresTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-postgres
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub ${EnvironmentName}-EcsTaskExecutionRoleArn
+      Volumes:
+        - Name: postgres-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref PostgresFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref PostgresAccessPoint
+      ContainerDefinitions:
+        - Name: postgres
+          Image: !Ref PostgresImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 5432
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: postgres-data
+              ContainerPath: /var/lib/postgresql/data
+              ReadOnly: false
+          Environment:
+            - Name: POSTGRES_DB
+              Value: !Ref DatabaseName
+            - Name: POSTGRES_USER
+              Value: !Ref MasterUsername
+            - Name: POSTGRES_PASSWORD
+              Value: !Ref MasterUserPassword
+            - Name: PGDATA
+              Value: /var/lib/postgresql/data/pgdata
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PostgresLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: postgres
+
+  PostgresTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-postgres-tg
+      Port: 5432
+      Protocol: TCP
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      HealthCheckProtocol: TCP
+
+  PostgresLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-postgres-nlb
+      Type: network
+      Scheme: internal
+      Subnets:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-shopping-cart-aurora-instance-1
+          Value: !Sub ${EnvironmentName}-postgres-nlb
 
-  DatabaseSecretAttachment:
-    Type: AWS::SecretsManager::SecretTargetAttachment
+  PostgresListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      SecretId: !Ref DatabaseSecret
-      TargetId: !Ref AuroraCluster
-      TargetType: AWS::RDS::DBCluster
+      LoadBalancerArn: !Ref PostgresLoadBalancer
+      Port: 5432
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref PostgresTargetGroup
+
+  PostgresService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - PostgresListener
+      - PostgresMountTarget1
+      - PostgresMountTarget2
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-postgres
+      Cluster:
+        Fn::ImportValue: !Sub ${EnvironmentName}-EcsClusterArn
+      TaskDefinition: !Ref PostgresTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Id
+            - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Id
+          SecurityGroups:
+            - Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+      LoadBalancers:
+        - ContainerName: postgres
+          ContainerPort: 5432
+          TargetGroupArn: !Ref PostgresTargetGroup
+      DeploymentConfiguration:
+        # A single EFS-backed postgres data dir can't tolerate two concurrent
+        # writers, so force stop-old-then-start-new instead of ECS's default
+        # rolling (start-new-before-stop-old) deployment.
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
 
 Outputs:
   ClusterEndpoint:
-    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Value: !GetAtt PostgresLoadBalancer.DNSName
     Export:
       Name: !Sub ${EnvironmentName}-DbClusterEndpoint
 
   ClusterPort:
-    Value: !GetAtt AuroraCluster.Endpoint.Port
+    Value: '5432'
     Export:
       Name: !Sub ${EnvironmentName}-DbClusterPort
 

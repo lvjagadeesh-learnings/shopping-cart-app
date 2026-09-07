@@ -87,8 +87,15 @@ Conditions:
 Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
+    # Retain on delete/rollback: the sandbox IAM user lacks logs:DeleteLogGroup,
+    # so CloudFormation-driven deletes of this resource always fail and leave
+    # the stack stuck in ROLLBACK_FAILED/DELETE_FAILED.
+    # No explicit LogGroupName: CFN auto-generates a unique name each create,
+    # so a retained/orphaned log group from a prior failed deploy never
+    # collides with the new one (name collision would fail early validation).
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      LogGroupName: !Sub /ecs/${EnvironmentName}/${ServiceName}
       RetentionInDays: !Ref LogRetentionInDays
 
   TaskDefinition:

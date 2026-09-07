@@ -49,12 +49,18 @@ Resources:
     # so CloudFormation-driven deletes of this resource always fail and leave
     # the stack stuck in ROLLBACK_FAILED/DELETE_FAILED. Retaining avoids that;
     # the log group is cheap to leave orphaned if the stack is ever deleted.
-    # No explicit LogGroupName: CFN auto-generates a unique name each create,
-    # so a retained/orphaned log group from a prior failed deploy never
-    # collides with the new one (name collision would fail early validation).
+    # Explicit name keyed on AWS::StackId's GUID (not just the stack name):
+    # CFN's auto-generated name for this resource type is NOT guaranteed
+    # unique across delete+recreate cycles of the same stack name, so a
+    # retained orphan from a prior attempt could collide with the new one
+    # (and CFN's collision-recovery also needs logs:DeleteLogGroup, which
+    # fails the same way). The StackId GUID changes on every fresh create.
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      LogGroupName: !Sub
+        - ${EnvironmentName}-database-postgres-${UniqueId}
+        - UniqueId: !Select [2, !Split ["/", !Ref "AWS::StackId"]]
       RetentionInDays: 14
 
   PostgresFileSystem:

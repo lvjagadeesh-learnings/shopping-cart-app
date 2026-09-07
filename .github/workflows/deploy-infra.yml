@@ -16,6 +16,7 @@ permissions:
 jobs:
   network:
     name: network
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-network
@@ -31,6 +32,7 @@ jobs:
     # secrets.MASTER_USER_PASSWORD below resolves against the sit/uat/prd
     # environment's scoped secret.
     environment: ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-database
@@ -43,6 +45,7 @@ jobs:
   ecr:
     name: ecr
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecr
@@ -54,6 +57,7 @@ jobs:
   ecs-cluster:
     name: ecs-cluster
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-ecs-cluster
@@ -65,6 +69,7 @@ jobs:
   sns-sqs:
     name: sns-sqs
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-sns-sqs
@@ -76,6 +81,7 @@ jobs:
   iam:
     name: iam
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-iam
@@ -87,6 +93,7 @@ jobs:
   alb:
     name: alb
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-alb
@@ -98,6 +105,7 @@ jobs:
   ecs-services:
     name: ecs-service (${{ matrix.service }})
     needs: [database, ecr, ecs-cluster, sns-sqs, iam, alb]
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +121,7 @@ jobs:
   frontend-hosting:
     name: s3-cloudfront-frontend
     needs: [network]
+    runs-on: ubuntu-latest
     uses: ./.github/workflows/reusable-cfn-deploy.yml
     with:
       stack-name: ${{ github.event.inputs.environment }}-shopping-cart-frontend

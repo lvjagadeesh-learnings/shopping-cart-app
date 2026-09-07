@@ -108,20 +108,11 @@ Resources:
       SecurityGroups:
         - !Ref PostgresEfsSecurityGroup
 
-  PostgresAccessPoint:
-    Type: AWS::EFS::AccessPoint
-    Properties:
-      FileSystemId: !Ref PostgresFileSystem
-      PosixUser:
-        Uid: '999'
-        Gid: '999'
-      RootDirectory:
-        Path: /postgres-data
-        CreationInfo:
-          OwnerUid: '999'
-          OwnerGid: '999'
-          Permissions: '0755'
-
+  # No AWS::EFS::AccessPoint: the sandbox IAM user lacks
+  # elasticfilesystem:CreateAccessPoint. Mount the EFS filesystem root
+  # directly instead — the postgres:16-alpine entrypoint runs as root and
+  # chowns its data directory itself, so no access-point-enforced POSIX
+  # user is required.
   PostgresTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -137,8 +128,6 @@ Resources:
           EFSVolumeConfiguration:
             FilesystemId: !Ref PostgresFileSystem
             TransitEncryption: ENABLED
-            AuthorizationConfig:
-              AccessPointId: !Ref PostgresAccessPoint
       ContainerDefinitions:
         - Name: postgres
           Image: !Ref PostgresImage

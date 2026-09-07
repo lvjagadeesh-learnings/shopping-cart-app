@@ -117,8 +117,12 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Sub ${EnvironmentName}-postgres
-      Cpu: '512'
-      Memory: '1024'
+      # Bumped from 512/1024: at 0.5 vCPU the task was prone to brief CPU
+      # contention during EFS-backed checkpoint/WAL I/O, which correlated
+      # with the NLB TCP health check missing enough probes in a row to
+      # get ECS to kill an otherwise-healthy, already-serving task.
+      Cpu: '1024'
+      Memory: '2048'
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
       ExecutionRoleArn:
@@ -165,6 +169,14 @@ Resources:
       VpcId:
         Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
       HealthCheckProtocol: TCP
+      HealthCheckIntervalSeconds: 30
+      # Default of 3 (~90s of failed probes) was tight enough that a single
+      # transient miss during a postgres checkpoint could tip the task into
+      # "unhealthy" and get it replaced by ECS even though it recovered a
+      # moment later. Widening to 10 (~300s) tolerates that without masking
+      # a genuinely dead task for long.
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 10
 
   PostgresLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -214,6 +226,10 @@ Resources:
         - ContainerName: postgres
           ContainerPort: 5432
           TargetGroupArn: !Ref PostgresTargetGroup
+      # Give postgres time to finish crash-recovery/WAL replay on cold start
+      # (PGDATA persists on EFS across task replacements) before ECS starts
+      # acting on the NLB's health status for this task.
+      HealthCheckGracePeriodSeconds: 120
       DeploymentConfiguration:
         # A single EFS-backed postgres data dir can't tolerate two concurrent
         # writers, so force stop-old-then-start-new instead of ECS's default

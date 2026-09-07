@@ -27,6 +27,7 @@ on:
     branches: ["main"]
   push:
     branches: ["main"]
+  workflow_dispatch: {}
 
 concurrency:
   group: ci-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -42,12 +43,19 @@ jobs:
     name: Detect backend changes
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      backend: ${{ steps.filter.outputs.backend || steps.manual.outputs.backend }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Manual runs have no push/PR diff to compare against, so always build everything.
+      - name: Force full run on manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: manual
+        run: echo "backend=true" >> "$GITHUB_OUTPUT"
+
       - name: Filter changed paths
+        if: github.event_name != 'workflow_dispatch'
         id: filter
         uses: dorny/paths-filter@v4
         with:
@@ -267,7 +275,9 @@ jobs:
 
   create-release-tag:
     name: Create Release Tag
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: |
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [summary]
     concurrency:
       group: release-tagging

@@ -76,14 +76,24 @@ jobs:
       - name: Read CloudFormation outputs
         id: outputs
         run: |
+          set -euo pipefail
           ENVIRONMENT="${{ github.event.inputs.environment || 'sit' }}"
           FRONTEND_STACK="${ENVIRONMENT}-shopping-cart-frontend"
           ALB_STACK="${ENVIRONMENT}-shopping-cart-alb"
 
           BUCKET=$(aws cloudformation describe-stacks --stack-name "$FRONTEND_STACK" \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+            --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
           ALB_DNS=$(aws cloudformation describe-stacks --stack-name "$ALB_STACK" \
-            --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDnsName'].OutputValue" --output text)
+
+          if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ]; then
+            echo "Could not resolve BucketName output from ${FRONTEND_STACK}." >&2
+            exit 1
+          fi
+          if [ -z "$ALB_DNS" ] || [ "$ALB_DNS" = "None" ]; then
+            echo "Could not resolve LoadBalancerDnsName output from ${ALB_STACK}." >&2
+            exit 1
+          fi
 
           echo "bucket-name=${BUCKET}" >> "$GITHUB_OUTPUT"
           echo "alb-dns-name=${ALB_DNS}" >> "$GITHUB_OUTPUT"

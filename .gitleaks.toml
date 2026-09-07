@@ -1,0 +1,14 @@
+title = "gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives for this repository"
+
+# CloudFormation network parameter files contain VPC/subnet CIDR blocks
+# (e.g. "10.0.10.0/24") which gitleaks' generic-api-key rule misidentifies
+# as high-entropy secrets. These are not secrets.
+paths = [
+  '''infra/cloudformation/parameters/(sit|uat|prd)/network\.json''',
+]

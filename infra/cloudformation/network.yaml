@@ -238,6 +238,16 @@ Outputs:
     Export:
       Name: !Sub ${EnvironmentName}-PrivateSubnet2Id
 
+  PrivateSubnet1Cidr:
+    Value: !Ref PrivateSubnet1Cidr
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet1Cidr
+
+  PrivateSubnet2Cidr:
+    Value: !Ref PrivateSubnet2Cidr
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet2Cidr
+
   AlbSecurityGroupId:
     Value: !Ref AlbSecurityGroup
     Export:

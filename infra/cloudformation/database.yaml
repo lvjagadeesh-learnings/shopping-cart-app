@@ -90,6 +90,38 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-postgres-efs-sg
 
+  # The postgres NLB is a network load balancer, which has no security group
+  # of its own to present as a source - its health check probes originate
+  # directly from the NLB node's private IP in each subnet it's deployed in.
+  # DatabaseSecurityGroup (defined in network.yaml) only allows inbound 5432
+  # from EcsServiceSecurityGroup, so without these rules the NLB can never
+  # complete a TCP health check against the task, no matter how the
+  # health-check thresholds are tuned - ECS just repeatedly kills an
+  # otherwise-healthy postgres task once the unhealthy threshold is hit.
+  PostgresNlbHealthCheckIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      CidrIp:
+        Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet1Cidr
+      Description: Allow postgres NLB health checks from private subnet 1
+
+  PostgresNlbHealthCheckIngress2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      CidrIp:
+        Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnet2Cidr
+      Description: Allow postgres NLB health checks from private subnet 2
+
   PostgresMountTarget1:
     Type: AWS::EFS::MountTarget
     Properties:

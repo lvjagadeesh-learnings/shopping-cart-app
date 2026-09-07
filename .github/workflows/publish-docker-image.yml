@@ -102,8 +102,10 @@ jobs:
 
       # gitleaks/gitleaks-action doesn't support the 'release' event this workflow
       # runs on, so scan the checked-out tree directly with the gitleaks CLI instead.
+      # --config points at the repo's .gitleaks.toml, which allowlists known
+      # false positives (e.g. CFN network parameter CIDR blocks).
       - name: Secret leak scan (gitleaks)
-        run: docker run --rm -v "${{ github.workspace }}:/repo" ghcr.io/gitleaks/gitleaks:latest dir /repo --redact
+        run: docker run --rm -v "${{ github.workspace }}:/repo" ghcr.io/gitleaks/gitleaks:latest dir /repo --config /repo/.gitleaks.toml --redact
 
       - name: Configure AWS credentials (access key)
         uses: aws-actions/configure-aws-credentials@v4
